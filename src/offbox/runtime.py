@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import math
 import re
@@ -11,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from offbox import __version__, console
+from offbox import DEFAULT_IMAGE, __version__, console
 from offbox.config import EnvConfig, Model, ProjectConfig, load_config
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
 from offbox.host import host_operation, select_host
@@ -21,6 +22,7 @@ from offbox.paths import Paths
 from offbox.runner import Result, Runner
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, StateStore
+from offbox.sync import SyncManager
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,11 @@ class ContainerInfo(DockerModel):
 class VolumeInfo(DockerModel):
     name: str = Field(alias="Name")
     labels: dict[str, str] | None = Field(default=None, alias="Labels")
+
+
+class BuiltImage(Model):
+    tag: str
+    digest: str
 
 
 class HostResources(Model):
@@ -188,16 +195,21 @@ fi
 """
 
 
-def mutation_script(work: Worktree, action: Literal["up", "fresh", "stop", "remove", "prune"], command: Sequence[str] = ()) -> str:
+def mutation_script(
+    work: Worktree, action: Literal["up", "fresh", "stop", "remove", "prune", "prepare"], command: Sequence[str] = (), *, pull: bool = True
+) -> str:
+    if action == "prepare":
+        return _GUARD + '\nmkdir -p -- "$directory/work"\n'
     if action in ("up", "fresh"):
         if not command:
             raise PreconditionError("Container command is missing", "Provide a valid environment configuration.")
         fresh = "true" if action == "fresh" else "false"
+        prepare_image = shlex.join(["docker", "pull", command[-1]]) + " >/dev/null" if pull else ":"
         return (
             _GUARD
             + f"""
 if {fresh} || [ -z "$container_id" ]; then
-    {shlex.join(["docker", "pull", command[-1]])} >/dev/null
+    {prepare_image}
     if {fresh}; then
         if [ -n "$container_id" ]; then docker rm -f "$container" >/dev/null; fi
         if [ -n "$volume_name" ]; then docker volume rm "$volume" >/dev/null; fi
@@ -246,6 +258,7 @@ class Runtime:
         self.runner = runner
         self.clock = clock or SystemClock()
         self.store = StateStore(paths.state)
+        self.sync = SyncManager(runner)
 
     def remote(self, host: HostState, argv: Sequence[str], *, check: bool = True, timeout: float = 30, input: str | None = None) -> Result:
         result = self.runner.run(ssh_argv(host.name, argv), check=False, timeout=timeout, input=input)
@@ -308,22 +321,26 @@ class Runtime:
         return work, env, self._host(env.host)
 
     def mutate(
-        self, host: HostState, work: Worktree, action: Literal["up", "fresh", "stop", "remove", "prune"], command: Sequence[str] = ()
+        self,
+        host: HostState,
+        work: Worktree,
+        action: Literal["up", "fresh", "stop", "remove", "prune", "prepare"],
+        command: Sequence[str] = (),
+        *,
+        pull: bool = True,
     ) -> Result:
         return self.remote(
             host,
             ["flock", "/var/lib/offbox/lock", "sh", "-s", "--", work.name, str(work.root), work.container, work.volume],
-            input=mutation_script(work, action, command),
+            input=mutation_script(work, action, command, pull=pull),
             timeout=600,
         )
 
     def up(self, *, cwd: Path | None = None, host_name: str | None = None, fresh: bool = False) -> EnvState:
         work = find_worktree(self.runner, cwd)
-        config = load_config(work.root / "offbox.toml", ProjectConfig).env
-        if config.dockerfile is not None:
-            raise PreconditionError(
-                "Custom Dockerfile builds require source sync", "Set env.image to a prebuilt image until source sync is available."
-            )
+        project = load_config(work.root / "offbox.toml", ProjectConfig)
+        config = project.env
+        dockerfile = self.dockerfile_path(work, config.dockerfile) if config.dockerfile is not None else None
         previous = self._recorded(work)
         if previous is not None and host_name is not None and previous.host != host_name:
             raise PreconditionError("Environment is registered on another host", "Remove it before selecting a different host.")
@@ -335,7 +352,8 @@ class Runtime:
                 resources = HostResources.model_validate_json(resource_result.stdout)
             except ValidationError as exc:
                 raise PreconditionError("Invalid host resource information", "Check the host Docker daemon.") from exc
-            command = container_command(work, config, resources.cpus, resources.memory)
+            resolved = config.model_copy(update={"dockerfile": None, "image": config.image or DEFAULT_IMAGE})
+            command = container_command(work, resolved, resources.cpus, resources.memory)
             existing = self.inspect(host, work)
             if existing is not None:
                 self._owned(work, existing)
@@ -344,10 +362,24 @@ class Runtime:
                     raise PreconditionError("Environment or host changed while preparing up", "Retry offbox up.")
                 env = previous or EnvState(name=work.name, host=host.name, worktree_path=work.root, created_at=datetime.now(UTC))
                 state.envs[env.name] = env
-            result = self.mutate(host, work, "fresh" if fresh else "up", command)
+            self.mutate(host, work, "prepare")
+            self.sync.ensure(work, host, project.sync)
+            built: BuiltImage | None = None
+            if dockerfile is not None:
+                self.sync.flush(work, host)
+                built = self.build_image(host, work, dockerfile)
+                command[-1] = built.tag
+            if fresh:
+                self.sync.pause(work, host)
+            result = self.mutate(host, work, "fresh" if fresh else "up", command, pull=dockerfile is None)
             container = self._container(result.stdout)
             self._owned(work, container)
             self.wait_ready(host, work, container)
+            if fresh:
+                self.sync.ensure(work, host, project.sync)
+            self.sync.flush(work, host)
+            if built is not None and built.digest != container.image:
+                console.warn("Custom image changed; run offbox up --fresh to use it. Existing Docker data is retained.")
             env.image_digest = container.image
             with self.store.transaction() as state:
                 if state.envs.get(env.name) is None:
@@ -359,6 +391,86 @@ class Runtime:
                 env = current
         console.success(f"Environment {env.name} ready on {host.name}")
         return env
+
+    def dockerfile_path(self, work: Worktree, configured: Path) -> str:
+        relative = configured
+        if configured.is_absolute():
+            try:
+                relative = configured.relative_to(work.root)
+            except ValueError as exc:
+                raise PreconditionError("Dockerfile is outside the worktree", "Set env.dockerfile to a file inside the worktree.") from exc
+        if ".." in relative.parts or relative == Path("."):
+            raise PreconditionError("Dockerfile is outside the worktree", "Set env.dockerfile to a file inside the worktree.")
+        candidate = work.root
+        try:
+            for component in relative.parts:
+                candidate /= component
+                if candidate.is_symlink():
+                    raise PreconditionError("Dockerfile path contains a symlink", "Use a regular Dockerfile path inside the worktree.")
+            if not candidate.is_file():
+                raise PreconditionError("Dockerfile does not exist", "Create the configured Dockerfile before running offbox up.")
+        except OSError as exc:
+            raise PreconditionError("Cannot inspect Dockerfile", "Check Dockerfile permissions and retry.") from exc
+        return relative.as_posix()
+
+    def build_image(self, host: HostState, work: Worktree, dockerfile: str) -> BuiltImage:
+        project_hash = hashlib.sha256(str(work.root).encode()).hexdigest()[:16]
+        script = (
+            _GUARD
+            + """
+target=$directory/work/$5
+parent=$target
+while [ "$parent" != "$directory/work" ]; do
+    if [ -L "$parent" ]; then
+        printf '%s\\n' 'offbox: refusing a symlinked Dockerfile path' >&2
+        exit 3
+    fi
+    parent=${parent%/*}
+done
+if [ ! -f "$target" ] || [ ! -r "$target" ]; then
+    printf '%s\\n' 'offbox: refusing a missing synced Dockerfile; check sync ignores' >&2
+    exit 3
+fi
+file_hash=$(sha256sum < "$target" | cut -d' ' -f1)
+case "$file_hash" in *[!a-f0-9]*|'') exit 3 ;; esac
+[ "${#file_hash}" -eq 64 ] || exit 3
+tag=offbox-local/$6:$file_hash
+cached=$(docker image ls -q --no-trunc "$tag")
+if [ -z "$cached" ]; then
+    docker build -t "$tag" -f "$target" "$directory/work" >&2
+fi
+image_id=$(docker image inspect --format '{{json .Id}}' "$tag")
+printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
+"""
+        )
+        result = self.remote(
+            host,
+            [
+                "flock",
+                "/var/lib/offbox/lock",
+                "sh",
+                "-s",
+                "--",
+                work.name,
+                str(work.root),
+                work.container,
+                work.volume,
+                dockerfile,
+                project_hash,
+            ],
+            input=script,
+            timeout=1800,
+        )
+        try:
+            image = BuiltImage.model_validate_json(result.stdout)
+        except ValidationError as exc:
+            raise PreconditionError("Invalid custom image build result", "Inspect the Docker build log and retry offbox up.") from exc
+        if (
+            re.fullmatch(r"offbox-local/" + project_hash + r":[a-f0-9]{64}", image.tag) is None
+            or re.fullmatch(r"sha256:[a-f0-9]{64}", image.digest) is None
+        ):
+            raise PreconditionError("Invalid custom image build result", "Inspect the Docker build log and retry offbox up.")
+        return image
 
     def diagnostics(self, host: HostState, work: Worktree) -> None:
         for command in (
@@ -424,6 +536,7 @@ class Runtime:
         work, env, host = self.current(cwd)
         with host_operation(self.paths, host.name):
             self._check_record(work, env, host)
+            self.sync.pause(work, host)
             self.mutate(host, work, "stop")
         console.success(f"Stopped {work.name}; data retained")
 
@@ -434,6 +547,8 @@ class Runtime:
             or (registered and current.host != host.name)
         ):
             raise PreconditionError("Environment registration changed before cleanup", "Review offbox list and run cleanup again.")
+        if current is None or current.host == host.name:
+            self.sync.terminate(work, host)
         self.mutate(host, work, "remove")
         with self.store.transaction() as state:
             current = state.envs.get(work.name)

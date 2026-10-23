@@ -1,0 +1,83 @@
+[
+  {
+    "identifier": "sync_owned",
+    "version": 1,
+    "creationTime": "2026-10-23T12:00:00.123456789Z",
+    "creatingVersion": "0.18.1",
+    "name": "offbox-app-abcd",
+    "labels": {
+      "offbox-env": "app-abcd"
+    },
+    "mode": "two-way-safe",
+    "ignore": {
+      "vcs": true,
+      "paths": [
+        "node_modules"
+      ]
+    },
+    "symlink": {},
+    "watch": {},
+    "permissions": {},
+    "compression": {},
+    "paused": false,
+    "status": "watching",
+    "successfulCycles": 1,
+    "alpha": {
+      "protocol": "local",
+      "path": "/src/app",
+      "connected": true,
+      "scanned": true,
+      "scanProblems": [
+        {
+          "path": "private.txt",
+          "error": "permission denied"
+        }
+      ],
+      "excludedScanProblems": 2,
+      "ignore": {},
+      "symlink": {},
+      "watch": {},
+      "permissions": {},
+      "compression": {}
+    },
+    "beta": {
+      "protocol": "ssh",
+      "host": "offbox-main",
+      "path": "/srv/offbox/envs/app-abcd/work",
+      "connected": true,
+      "scanned": true,
+      "transitionProblems": [
+        {
+          "path": "generated.txt",
+          "error": "read-only"
+        }
+      ],
+      "excludedTransitionProblems": 3,
+      "ignore": {},
+      "symlink": {},
+      "watch": {},
+      "permissions": {
+        "defaultFileMode": "0644",
+        "defaultDirectoryMode": "0755"
+      },
+      "compression": {}
+    },
+    "conflicts": [
+      {
+        "root": "config.txt",
+        "alphaChanges": [
+          {
+            "path": "config.txt",
+            "old": null,
+            "new": {
+              "kind": "file",
+              "digest": "1111"
+            }
+          }
+        ],
+        "betaChanges": []
+      }
+    ],
+    "excludedConflicts": 4
+  }
+]

@@ -512,10 +512,10 @@ def test_destroy_accepts_full_length_digit_started_env_names(tmp_path: Path) -> 
     env_name = "1" + "a" * 31 + "-abcd"
     env = EnvState(name=env_name, host="main", worktree_path=tmp_path / "repo", created_at=datetime.now(UTC))
     StateStore(paths.state).write(State(hosts={"main": host}, envs={env_name: env}))
-    runner = FakeRunner([Script(prefix=["mutagen", "sync", "terminate"]), Script(prefix=["tofu", "destroy"])])
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "list"], stdout="[]"), Script(prefix=["tofu", "destroy"])])
     destroy_host(paths, runner, "main", executable=Path("tofu"))
     assert [call.argv for call in runner.calls] == [
-        ["mutagen", "sync", "terminate", f"offbox-{env_name}"],
+        ["mutagen", "sync", "list", "--label-selector", f"offbox-env={env_name}", "--template", "{{ json . }}"],
         ["tofu", "destroy", "-auto-approve", "-input=false"],
     ]
     assert StateStore(paths.state).read().envs == {}
@@ -578,8 +578,9 @@ def test_host_ssh_separator_preserves_exact_remote_arguments(
 def test_missing_mutagen_does_not_strand_host_cleanup(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     import subprocess
 
-    from offbox.host.destroy import terminate_sync
+    from offbox.naming import Worktree
     from offbox.runner import SubprocessRunner
+    from offbox.sync import SyncManager
 
     def missing(_argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise FileNotFoundError(2, "No such file or directory", "mutagen")
@@ -589,15 +590,16 @@ def test_missing_mutagen_does_not_strand_host_cleanup(monkeypatch: pytest.Monkey
     def unavailable(_name: str) -> str | None:
         return None
 
-    monkeypatch.setattr("offbox.host.destroy.shutil.which", unavailable)
-    terminate_sync(SubprocessRunner(), "project-abcd")
+    monkeypatch.setattr("offbox.sync.shutil.which", unavailable)
+    SyncManager(SubprocessRunner()).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))
     assert "Mutagen is not installed" in capsys.readouterr().err
 
 
 def test_mutagen_termination_failure_is_not_hidden() -> None:
     from offbox.errors import CommandFailed
-    from offbox.host.destroy import terminate_sync
+    from offbox.naming import Worktree
+    from offbox.sync import SyncManager
 
     runner = FakeRunner([Script(prefix=["mutagen"], returncode=1, stderr="daemon permission denied")])
     with pytest.raises(CommandFailed, match="daemon permission denied"):
-        terminate_sync(runner, "project-abcd")
+        SyncManager(runner).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))

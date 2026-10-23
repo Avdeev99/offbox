@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ from offbox.errors import PreconditionError
 from offbox.paths import Paths
 from offbox.runner import FakeRunner, Script
 from offbox.state import EnvState, HostState, State, StateStore
+from offbox.sync import DEFAULT_IGNORES
 
 
 @pytest.mark.parametrize(
@@ -85,13 +87,13 @@ def test_exact_container_command_and_labelled_volume() -> None:
     ]
 
 
-def test_custom_dockerfile_refuses_before_any_remote_mutation(tmp_path: Path) -> None:
+def test_missing_dockerfile_refuses_before_any_remote_mutation(tmp_path: Path) -> None:
     from offbox.paths import Paths
     from offbox.runtime import Runtime
 
     (tmp_path / "offbox.toml").write_text('[env]\ndockerfile="Dockerfile"\n')
     runner = FakeRunner([Script(prefix=["git", "rev-parse"], stdout=str(tmp_path))])
-    with pytest.raises(PreconditionError, match="source sync"):
+    with pytest.raises(PreconditionError, match="Dockerfile does not exist"):
         Runtime(Paths(tmp_path / "cfg", tmp_path / "state", tmp_path / "cache", tmp_path / "control"), runner).up(cwd=tmp_path, fresh=True)
     assert [call.argv for call in runner.calls] == [["git", "rev-parse", "--show-toplevel"]]
 
@@ -125,6 +127,61 @@ def container_json(root: Path, name: str, *, running: bool = True, labels_root: 
     )
 
 
+def sync_response(root: Path, name: str, *, paused: bool = False) -> str:
+    return json.dumps(
+        [
+            {
+                "identifier": "sync_owned",
+                "version": 1,
+                "creationTime": "2026-10-23T12:00:00Z",
+                "creatingVersion": "0.18.1",
+                "name": f"offbox-{name}",
+                "labels": {"offbox-env": name},
+                "paused": paused,
+                "status": "disconnected" if paused else "watching",
+                "mode": "two-way-safe",
+                "ignore": {"vcs": True, "paths": list(DEFAULT_IGNORES)},
+                "alpha": {"protocol": "local", "path": str(root), "connected": True},
+                "beta": {
+                    "protocol": "ssh",
+                    "host": "offbox-main",
+                    "path": f"/srv/offbox/envs/{name}/work",
+                    "connected": not paused,
+                    "permissions": {"defaultFileMode": "0644", "defaultDirectoryMode": "0755"},
+                },
+            }
+        ]
+    )
+
+
+def sync_ready_scripts(root: Path, name: str, *, fresh: bool = False, custom: bool = False) -> list[Script]:
+    result = sync_response(root, name)
+    commands = [Script(prefix=["mutagen", "sync", "list"], stdout="[]"), Script(prefix=["mutagen", "sync", "create"])]
+    if custom:
+        commands.extend(
+            [
+                Script(prefix=["mutagen", "sync", "list"], stdout=result),
+                Script(prefix=["mutagen", "sync", "flush"]),
+                Script(prefix=["mutagen", "sync", "list"], stdout=result),
+            ]
+        )
+    if fresh:
+        commands.extend(
+            [
+                Script(prefix=["mutagen", "sync", "list"], stdout=result),
+                Script(prefix=["mutagen", "sync", "pause"]),
+                Script(prefix=["mutagen", "sync", "list"], stdout=sync_response(root, name, paused=True)),
+                Script(prefix=["mutagen", "sync", "resume"]),
+            ]
+        )
+    return [
+        *commands,
+        Script(prefix=["mutagen", "sync", "list"], stdout=result),
+        Script(prefix=["mutagen", "sync", "flush"]),
+        Script(prefix=["mutagen", "sync", "list"], stdout=result),
+    ]
+
+
 def test_remove_cleans_remote_resources_before_state(tmp_path: Path) -> None:
     from offbox.naming import Worktree, worktree_name
     from offbox.runtime import Runtime
@@ -133,7 +190,7 @@ def test_remove_cleans_remote_resources_before_state(tmp_path: Path) -> None:
     work = Worktree(root=root, name=worktree_name(root))
     with StateStore(paths.state).transaction() as state:
         state.envs[work.name] = EnvState(name=work.name, host="main", worktree_path=root, created_at=datetime.now(UTC))
-    runner = FakeRunner([Script(prefix=["git"], stdout=str(root)), Script(prefix=["ssh"])])
+    runner = FakeRunner([Script(prefix=["git"], stdout=str(root)), Script(prefix=["mutagen"], stdout="[]"), Script(prefix=["ssh"])])
     Runtime(paths, runner).remove(cwd=root)
     assert StateStore(paths.state).read().envs == {}
     assert runner.calls[-1].input is not None
@@ -149,7 +206,7 @@ def test_stop_preserves_state_and_data(tmp_path: Path) -> None:
     env = EnvState(name=name, host="main", worktree_path=root, created_at=datetime.now(UTC))
     with StateStore(paths.state).transaction() as state:
         state.envs[name] = env
-    runner = FakeRunner([Script(prefix=["git"], stdout=str(root)), Script(prefix=["ssh"])])
+    runner = FakeRunner([Script(prefix=["git"], stdout=str(root)), Script(prefix=["mutagen"], stdout="[]"), Script(prefix=["ssh"])])
     Runtime(paths, runner).stop(cwd=root)
     assert StateStore(paths.state).read().envs[name] == env
     assert root.exists()
@@ -243,18 +300,21 @@ def test_up_records_actual_image_and_keeps_atomic_remote_lock(tmp_path: Path, fr
             Script(prefix=["ssh"]),
         ]
     )
+    runner.scripts.insert(4, Script(prefix=["ssh"]))
+    runner.scripts.extend(sync_ready_scripts(root, name, fresh=fresh))
     env = Runtime(paths, runner, FakeClock()).up(cwd=root, fresh=fresh)
     assert env.image_digest == "sha256:actual-image"
     assert StateStore(paths.state).read().envs[name].worktree_path == root
     assert StateStore(paths.state).read().envs[name].host == "main"
-    mutation = runner.calls[-2]
+    remote_calls = [call for call in runner.calls if call.argv[0] == "ssh"]
+    mutation = remote_calls[-2]
     assert mutation.argv[-1].startswith("flock /var/lib/offbox/lock sh -s -- ")
     assert mutation.input is not None
     assert "docker pull " in mutation.input
     assert mutation.input.index("docker pull ") < mutation.input.index('docker rm -f "$container"')
     assert 'rm -rf -- "$directory"' not in mutation.input
     assert (
-        runner.calls[-1].argv[-1]
+        remote_calls[-1].argv[-1]
         == f"docker exec offbox-{name} sh -c 'test -f /run/offbox/ready && docker --host=unix:///var/run/docker.sock info >/dev/null 2>&1'"
     )
 
@@ -310,7 +370,13 @@ def test_remove_remote_failure_retains_state(tmp_path: Path) -> None:
     name = worktree_name(root)
     with StateStore(paths.state).transaction() as state:
         state.envs[name] = EnvState(name=name, host="main", worktree_path=root, created_at=datetime.now(UTC))
-    runner = FakeRunner([Script(prefix=["git"], stdout=str(root)), Script(prefix=["ssh"], returncode=1, stderr="volume busy")])
+    runner = FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["mutagen"], stdout="[]"),
+            Script(prefix=["ssh"], returncode=1, stderr="volume busy"),
+        ]
+    )
     with pytest.raises(CommandFailed):
         Runtime(paths, runner).remove(cwd=root)
     assert name in StateStore(paths.state).read().envs
@@ -598,3 +664,136 @@ def test_gc_refuses_inaccessible_worktree_instead_of_deleting(tmp_path: Path, mo
         Runtime(paths, runner).gc_plan()
     assert runner.calls == []
     assert name in StateStore(paths.state).read().envs
+
+
+def custom_up_runner(root: Path, name: str, *, fresh: bool = False, build_fails: bool = False) -> FakeRunner:
+    tag = "offbox-local/" + hashlib.sha256(str(root).encode()).hexdigest()[:16] + ":" + "b" * 64
+    return FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
+            Script(prefix=["ssh"], stdout=container_json(root, name)),
+            Script(prefix=["ssh"]),
+            Script(
+                prefix=["ssh"],
+                returncode=1 if build_fails else 0,
+                stderr="synthetic compiler failure" if build_fails else "",
+                stdout=json.dumps({"tag": tag, "digest": "sha256:" + "a" * 64}),
+            ),
+            Script(prefix=["ssh"], stdout=container_json(root, name)),
+            Script(prefix=["ssh"]),
+            *sync_ready_scripts(root, name, fresh=fresh, custom=True),
+        ]
+    )
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+def test_custom_dockerfile_flushes_before_build_and_preserves_actual_container_digest(
+    tmp_path: Path, fresh: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths, _host, root = runtime_setup(tmp_path)
+    (root / "Docker file").write_text("FROM ubuntu:24.04\n")
+    (root / "offbox.toml").write_text('[env]\ndockerfile="Docker file"\n')
+    name = worktree_name(root)
+    runner = custom_up_runner(root, name, fresh=fresh)
+    env = Runtime(paths, runner, FakeClock()).up(cwd=root, fresh=fresh)
+    assert env.image_digest == "sha256:actual-image"
+    assert "run offbox up --fresh" in capsys.readouterr().err
+    build = next(call for call in runner.calls if call.input and 'docker build -t "$tag"' in call.input)
+    mutation = next(call for call in runner.calls if call.input and 'docker container inspect "$container"\n' in call.input)
+    flushes = [index for index, call in enumerate(runner.calls) if call.argv[:3] == ["mutagen", "sync", "flush"]]
+    assert flushes[0] < runner.calls.index(build) < runner.calls.index(mutation) < flushes[-1]
+    assert build.argv[-1].endswith("'Docker file' " + hashlib.sha256(str(root).encode()).hexdigest()[:16])
+    assert build.timeout == 1800
+    assert build.input and 'sha256sum < "$target"' in build.input
+    assert mutation.input and "docker pull" not in mutation.input
+    assert StateStore(paths.state).read().envs[name].image_digest == "sha256:actual-image"
+    if fresh:
+        pause = next(index for index, call in enumerate(runner.calls) if call.argv[:3] == ["mutagen", "sync", "pause"])
+        resume = next(index for index, call in enumerate(runner.calls) if call.argv[:3] == ["mutagen", "sync", "resume"])
+        assert runner.calls.index(build) < pause < runner.calls.index(mutation) < resume < flushes[-1]
+
+
+def test_custom_build_failure_does_not_destroy_existing_container_or_volume(tmp_path: Path) -> None:
+    from offbox.errors import CommandFailed
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths, _host, root = runtime_setup(tmp_path)
+    (root / "Dockerfile").write_text("FROM ubuntu:24.04\n")
+    (root / "offbox.toml").write_text('[env]\ndockerfile="Dockerfile"\n')
+    name = worktree_name(root)
+    old = EnvState(name=name, host="main", worktree_path=root, created_at=datetime.now(UTC), image_digest="old-image")
+    with StateStore(paths.state).transaction() as state:
+        state.envs[name] = old
+    runner = custom_up_runner(root, name, fresh=True, build_fails=True)
+    with pytest.raises(CommandFailed, match="synthetic compiler failure"):
+        Runtime(paths, runner).up(cwd=root, fresh=True)
+    assert StateStore(paths.state).read().envs[name] == old
+    assert not any(call.input and "docker rm -f" in call.input for call in runner.calls)
+    assert not any(call.argv[:3] == ["mutagen", "sync", "pause"] for call in runner.calls)
+
+
+@pytest.mark.parametrize("configured", ["../Dockerfile", "/outside/Dockerfile", "link/Dockerfile"])
+def test_dockerfile_escape_or_symlink_refused_before_remote_work(tmp_path: Path, configured: str) -> None:
+    from offbox.runtime import Runtime
+
+    paths, _host, root = runtime_setup(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "Dockerfile").write_text("FROM ubuntu:24.04\n")
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    (root / "offbox.toml").write_text('[env]\ndockerfile="' + configured + '"\n')
+    runner = FakeRunner([Script(prefix=["git"], stdout=str(root))])
+    with pytest.raises(PreconditionError, match="outside|symlink"):
+        Runtime(paths, runner).up(cwd=root, fresh=True)
+    assert [call.argv[0] for call in runner.calls] == ["git"]
+
+
+def test_fresh_sync_preflight_failure_preserves_existing_resources(tmp_path: Path) -> None:
+    from offbox.errors import CommandFailed
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths, _host, root = runtime_setup(tmp_path)
+    name = worktree_name(root)
+    old = EnvState(name=name, host="main", worktree_path=root, created_at=datetime.now(UTC), image_digest="old-image")
+    with StateStore(paths.state).transaction() as state:
+        state.envs[name] = old
+    runner = FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
+            Script(prefix=["ssh"], stdout=container_json(root, name)),
+            Script(prefix=["ssh"]),
+            Script(prefix=["mutagen"], returncode=1, stderr="daemon failed"),
+        ]
+    )
+    with pytest.raises(CommandFailed, match="daemon failed"):
+        Runtime(paths, runner).up(cwd=root, fresh=True)
+    assert not any(call.input and "docker rm -f" in call.input for call in runner.calls)
+    assert StateStore(paths.state).read().envs[name] == old
+
+
+@pytest.mark.parametrize("action", ["stop", "remove"])
+def test_sync_cleanup_failure_preserves_environment_and_remote_resources(tmp_path: Path, action: str) -> None:
+    from offbox.errors import CommandFailed
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths, _host, root = runtime_setup(tmp_path)
+    name = worktree_name(root)
+    old = EnvState(name=name, host="main", worktree_path=root, created_at=datetime.now(UTC))
+    with StateStore(paths.state).transaction() as state:
+        state.envs[name] = old
+    runner = FakeRunner([Script(prefix=["git"], stdout=str(root)), Script(prefix=["mutagen"], returncode=1, stderr="RPC failure")])
+    runtime = Runtime(paths, runner)
+    with pytest.raises(CommandFailed, match="RPC failure"):
+        (runtime.stop if action == "stop" else runtime.remove)(cwd=root)
+    assert not any(call.argv[0] == "ssh" for call in runner.calls)
+    assert StateStore(paths.state).read().envs[name] == old
