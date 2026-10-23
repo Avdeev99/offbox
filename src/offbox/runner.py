@@ -266,6 +266,8 @@ class Call(BaseModel):
 
 
 class Script(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     prefix: list[str]
     returncode: int = 0
     stdout: str = ""

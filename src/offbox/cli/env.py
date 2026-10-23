@@ -27,10 +27,13 @@ def _confirm(message: str, yes: bool, fix: str) -> None:
 
 
 def up(
-    ctx: typer.Context, host: Annotated[str | None, typer.Option("--host")] = None, fresh: Annotated[bool, typer.Option("--fresh")] = False
+    ctx: typer.Context,
+    host: Annotated[str | None, typer.Option("--host")] = None,
+    fresh: Annotated[bool, typer.Option("--fresh")] = False,
+    no_stack: Annotated[bool, typer.Option("--no-stack")] = False,
 ) -> None:
     """Create or start this worktree's isolated environment."""
-    _runtime(ctx).up(host_name=host, fresh=fresh)
+    _runtime(ctx).up(host_name=host, fresh=fresh, no_stack=no_stack)
 
 
 def stop(ctx: typer.Context) -> None:
