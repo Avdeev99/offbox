@@ -122,6 +122,7 @@ def container_json(root: Path, name: str, *, running: bool = True, labels_root: 
                 "Image": "sha256:actual-image",
                 "State": {"Running": running, "ExitCode": 0, "Status": "running" if running else "exited"},
                 "Config": {"Labels": {"offbox.env": name, "offbox.worktree": labels_root or str(root), "offbox.version": "0.0.1"}},
+                "NetworkSettings": {"Networks": {"offbox": {"IPAddress": "10.89.0.2"}}},
             }
         ]
     )
@@ -797,3 +798,222 @@ def test_sync_cleanup_failure_preserves_environment_and_remote_resources(tmp_pat
         (runtime.stop if action == "stop" else runtime.remove)(cwd=root)
     assert not any(call.argv[0] == "ssh" for call in runner.calls)
     assert StateStore(paths.state).read().envs[name] == old
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+def test_up_restores_ports_after_stack_and_fresh_cancels_before_replacement(
+    tmp_path: Path, fresh: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from ipaddress import IPv4Address
+
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths, host, root = runtime_setup(tmp_path)
+    name = worktree_name(root)
+    (root / "offbox.toml").write_text('[ports]\nforward=[8000]\nauto=false\n[stack]\nup="start-stack"\n')
+    with StateStore(paths.state).transaction() as state:
+        state.hosts[host.name].control_master_pid = 100
+        state.envs[name] = EnvState(
+            name=name,
+            host=host.name,
+            worktree_path=root,
+            created_at=datetime.now(UTC),
+            local_ports={8000: 18000},
+            active_forwards=[8000],
+            forward_ip=IPv4Address("10.89.0.2"),
+        )
+    runner = FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
+            Script(prefix=["ssh"], stdout=container_json(root, name)),
+            Script(prefix=["ssh"]),
+            *(
+                [
+                    Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=100)"),
+                    Script(prefix=["ssh", "-O", "cancel"]),
+                ]
+                if fresh
+                else []
+            ),
+            Script(prefix=["ssh"], stdout=container_json(root, name)),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], method="start_stream"),
+            Script(prefix=["ssh"], stdout=container_json(root, name)),
+            Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=200)"),
+            Script(prefix=["ssh", "-O", "forward"]),
+            *sync_ready_scripts(root, name, fresh=fresh),
+        ]
+    )
+    env = Runtime(paths, runner, FakeClock()).up(cwd=root, fresh=fresh)
+    assert env.local_ports == {8000: 18000}
+    assert env.active_forwards == [8000]
+    assert StateStore(paths.state).read().hosts[host.name].control_master_pid == 200
+    calls = runner.calls
+    stack = next(index for index, call in enumerate(calls) if call.method == "start_stream")
+    forward = next(index for index, call in enumerate(calls) if call.argv[:3] == ["ssh", "-O", "forward"])
+    assert stack < forward
+    assert calls[forward].argv == ["ssh", "-O", "forward", "-L", "127.0.0.1:18000:10.89.0.2:8000", "offbox-main"]
+    if fresh:
+        cancel = next(index for index, call in enumerate(calls) if call.argv[:3] == ["ssh", "-O", "cancel"])
+        replacement = next(index for index, call in enumerate(calls) if call.input and 'docker rm -f "$container"' in call.input)
+        assert cancel < replacement
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert f"localhost:18000 → {name}:8000" in output.err
+
+
+@pytest.mark.parametrize("action", ["stop", "remove"])
+def test_lifecycle_cancel_failure_prevents_resource_mutation_and_state_deletion(tmp_path: Path, action: str) -> None:
+    from ipaddress import IPv4Address
+
+    from offbox.errors import CommandFailed
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths, host, root = runtime_setup(tmp_path)
+    name = worktree_name(root)
+    with StateStore(paths.state).transaction() as state:
+        state.hosts[host.name].control_master_pid = 100
+        state.envs[name] = EnvState(
+            name=name,
+            host=host.name,
+            worktree_path=root,
+            created_at=datetime.now(UTC),
+            local_ports={8000: 8000},
+            active_forwards=[8000],
+            forward_ip=IPv4Address("10.89.0.2"),
+        )
+    runner = FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=100)"),
+            Script(prefix=["ssh", "-O", "cancel"], returncode=255, stderr="listener cancellation failed"),
+        ]
+    )
+    runtime = Runtime(paths, runner)
+    with pytest.raises(CommandFailed, match="listener cancellation failed"):
+        (runtime.stop if action == "stop" else runtime.remove)(cwd=root)
+    assert StateStore(paths.state).read().envs[name].active_forwards == [8000]
+    assert all(call.input is None for call in runner.calls)
+    assert not any(call.argv[0] == "mutagen" for call in runner.calls)
+
+
+@pytest.mark.parametrize("action", ["stop", "remove", "gc"])
+def test_cleanup_cancels_owned_forward_before_mutation_and_retains_only_stop_mapping(tmp_path: Path, action: str) -> None:
+    from ipaddress import IPv4Address
+
+    from offbox.naming import Worktree, worktree_name
+    from offbox.runtime import GcPlan, GcTarget, Runtime
+
+    paths, host, root = runtime_setup(tmp_path)
+    work = Worktree(root=root, name=worktree_name(root))
+    with StateStore(paths.state).transaction() as state:
+        state.hosts[host.name].control_master_pid = 100
+        state.envs[work.name] = EnvState(
+            name=work.name,
+            host=host.name,
+            worktree_path=root,
+            created_at=datetime.now(UTC),
+            local_ports={8000: 18000},
+            active_forwards=[8000],
+            forward_ip=IPv4Address("10.89.0.2"),
+        )
+    runner = FakeRunner(
+        [
+            *([Script(prefix=["git"], stdout=str(root))] if action != "gc" else []),
+            Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=100)"),
+            Script(prefix=["ssh", "-O", "cancel"]),
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    runtime = Runtime(paths, runner)
+    if action == "gc":
+        runtime.collect(GcPlan(targets=[GcTarget(host=host.name, worktree=work, reason="stale", registered=True)]))
+    else:
+        (runtime.stop if action == "stop" else runtime.remove)(cwd=root)
+    calls = runner.calls
+    cancel = next(index for index, call in enumerate(calls) if call.argv[:3] == ["ssh", "-O", "cancel"])
+    assert calls[cancel].argv == ["ssh", "-O", "cancel", "-L", "127.0.0.1:18000:10.89.0.2:8000", "offbox-main"]
+    assert cancel < next(index for index, call in enumerate(calls) if call.input)
+    state = StateStore(paths.state).read()
+    if action == "stop":
+        assert state.envs[work.name].local_ports == {8000: 18000}
+        assert state.envs[work.name].active_forwards == []
+        assert state.envs[work.name].forward_ip is None
+    else:
+        assert work.name not in state.envs
+
+
+def test_orphan_gc_does_not_cancel_another_hosts_same_named_environment(tmp_path: Path) -> None:
+    from ipaddress import IPv4Address
+
+    from offbox.naming import Worktree, worktree_name
+    from offbox.runtime import GcPlan, GcTarget, Runtime
+
+    paths, host, root = runtime_setup(tmp_path)
+    work = Worktree(root=root, name=worktree_name(root))
+    env = EnvState(
+        name=work.name,
+        host="other",
+        worktree_path=root,
+        created_at=datetime.now(UTC),
+        local_ports={8000: 8000},
+        active_forwards=[8000],
+        forward_ip=IPv4Address("10.89.0.3"),
+    )
+    with StateStore(paths.state).transaction() as state:
+        state.hosts["other"] = host.model_copy(update={"name": "other"})
+        state.envs[env.name] = env
+    runner = FakeRunner([Script(prefix=["ssh"])])
+    Runtime(paths, runner).collect(GcPlan(targets=[GcTarget(host=host.name, worktree=work, reason="orphan", registered=False)]))
+    assert StateStore(paths.state).read().envs[env.name] == env
+    assert len(runner.calls) == 1
+    assert runner.calls[0].input is not None
+
+
+@pytest.mark.parametrize("changed_field", ["control_master_pid", "address"])
+def test_lifecycle_revalidation_ignores_master_identity_but_checks_host_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed_field: str
+) -> None:
+    from collections.abc import Generator
+    from contextlib import contextmanager
+
+    from offbox.host import host_operation
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths, host, root = runtime_setup(tmp_path)
+    name = worktree_name(root)
+    with StateStore(paths.state).transaction() as state:
+        state.envs[name] = EnvState(name=name, host=host.name, worktree_path=root, created_at=datetime.now(UTC))
+
+    @contextmanager
+    def changed_master(selected: Paths, host_name: str) -> Generator[None]:
+        with host_operation(selected, host_name):
+            with StateStore(paths.state).transaction() as state:
+                if changed_field == "control_master_pid":
+                    state.hosts[host_name].control_master_pid = 201
+                else:
+                    state.hosts[host_name].address = "192.0.2.2"
+            yield
+
+    monkeypatch.setattr("offbox.runtime.host_operation", changed_master)
+    runner = FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    if changed_field == "control_master_pid":
+        Runtime(paths, runner).stop(cwd=root)
+        assert StateStore(paths.state).read().hosts[host.name].control_master_pid == 201
+        assert len(runner.calls) == 3
+    else:
+        with pytest.raises(PreconditionError, match="Environment changed"):
+            Runtime(paths, runner).stop(cwd=root)
+        assert len(runner.calls) == 1

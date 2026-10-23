@@ -11,7 +11,7 @@ from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.providers import credentials_env, load_provider, validate_name
 from offbox.runner import Runner
-from offbox.ssh import ssh_argv, sync_config
+from offbox.ssh import close_master, sync_config
 from offbox.state import StateStore
 from offbox.sync import SyncManager
 from offbox.tools import ToolDiscovery
@@ -30,25 +30,26 @@ def _destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, exec
     credentials = credentials_env(provider.manifest, paths)
     binary = None if provider.manifest.driver == "none" else executable or ToolDiscovery(runner, paths.cache).check("tofu").path
     store = StateStore(paths.state)
+    snapshot = store.read()
+    if snapshot.hosts.get(host.name) != host:
+        raise PreconditionError("Host changed while preparing destruction", "Run host destroy again after other operations finish.")
+    envs = {name: env for name, env in snapshot.envs.items() if env.host == host.name}
+    for env in envs.values():
+        if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,36}", env.name) is None:
+            raise PreconditionError("Invalid stored environment name", "Repair the environment state before destroying its host.")
+        SyncManager(runner).terminate(Worktree(root=env.worktree_path, name=env.name), host)
+    if host.address:
+        close_master(runner, host.name)
+    if provider.manifest.driver == "none":
+        NoneDriver(runner, host).destroy()
+        close_master(runner, host.name)
+    else:
+        if binary is None:
+            raise PreconditionError("Provider tool is unavailable", "Install OpenTofu or Terraform and retry.")
+        TofuDriver(runner, host.provider_dir, paths.cache, credentials, binary).destroy()
     with store.transaction() as state:
-        if state.hosts.get(host.name) != host:
+        if state.hosts.get(host.name) != host or {name: env for name, env in state.envs.items() if env.host == host.name} != envs:
             raise PreconditionError("Host changed while preparing destruction", "Run host destroy again after other operations finish.")
-        envs = [env for env in state.envs.values() if env.host == host.name]
-        for env in envs:
-            if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,36}", env.name) is None:
-                raise PreconditionError("Invalid stored environment name", "Repair the environment state before destroying its host.")
-            SyncManager(runner).terminate(Worktree(root=env.worktree_path, name=env.name), host)
-        if host.address:
-            master = runner.run(["ssh", "-O", "check", f"offbox-{host.name}"], check=False, timeout=5)
-            if master.returncode == 0:
-                runner.run(["ssh", "-O", "exit", f"offbox-{host.name}"], timeout=5)
-        if provider.manifest.driver == "none":
-            NoneDriver(runner, host).destroy()
-            runner.run(ssh_argv(host.name, options=["-O", "exit"]), check=False, timeout=5)
-        else:
-            if binary is None:
-                raise PreconditionError("Provider tool is unavailable", "Install OpenTofu or Terraform and retry.")
-            TofuDriver(runner, host.provider_dir, paths.cache, credentials, binary).destroy()
         del state.hosts[host.name]
         state.envs = {name: env for name, env in state.envs.items() if env.host != host.name}
         if state.default_host == host.name:

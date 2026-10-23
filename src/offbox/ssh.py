@@ -6,10 +6,40 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from offbox import console
-from offbox.errors import PreconditionError
+from offbox.errors import ConnectionError_, PreconditionError
 from offbox.paths import Paths
 from offbox.providers import validate_name
+from offbox.runner import Runner
 from offbox.state import HostState, State
+
+
+def master_pid(runner: Runner, name: str) -> int | None:
+    validate_name(name)
+    result = runner.run(["ssh", "-O", "check", f"offbox-{name}"], check=False, env={"LC_ALL": "C"}, timeout=10)
+    if result.returncode:
+        diagnostics = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+        if diagnostics and all(
+            re.fullmatch(r"Control socket connect\(.+\): (No such file or directory|Connection refused)", line) for line in diagnostics
+        ):
+            return None
+        raise ConnectionError_(
+            f"Cannot check SSH master for {name}: {result.stderr.strip()}",
+            f"Check SSH configuration and control socket permissions for offbox-{name}, then retry.",
+        )
+    match = re.search(r"Master running \(pid=([1-9][0-9]*)\)", result.stderr + "\n" + result.stdout)
+    if match is None:
+        raise PreconditionError("Cannot identify the SSH master", "Check OpenSSH multiplexing output and retry.")
+    return int(match[1])
+
+
+def close_master(runner: Runner, name: str) -> None:
+    if master_pid(runner, name) is None:
+        return
+    result = runner.run(["ssh", "-O", "exit", f"offbox-{name}"], check=False, env={"LC_ALL": "C"}, timeout=10)
+    if result.returncode:
+        raise ConnectionError_(
+            f"Cannot close SSH master for {name}: {result.stderr.strip()}", f"Run ssh -O exit offbox-{name}, then retry cleanup."
+        )
 
 
 def write_private(path: Path, content: str) -> None:

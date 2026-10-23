@@ -145,3 +145,64 @@ def test_invalid_setup_env_refuses_before_fresh_mutation(tmp_path: Path) -> None
     with pytest.raises(PreconditionError, match="Invalid exec.env"):
         Runtime(paths, runner).up(cwd=root, fresh=True)
     assert [call.argv[0] for call in runner.calls] == ["git"]
+
+
+def test_exec_restores_ports_after_flush_install_and_releases_host_lock_before_user_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Mapping, Sequence
+
+    from offbox.config import InstallConfig
+    from offbox.host import host_operation
+    from offbox.naming import Worktree
+    from offbox.runner import StreamProcess
+    from offbox.sync import SyncManager
+
+    paths, root, name = setup(tmp_path)
+    with StateStore(paths.state).transaction() as state:
+        state.envs[name].local_ports = {8000: 8000}
+    (root / "offbox.toml").write_text("[ports]\nforward=[8000]\nauto=false\n")
+    inspected = json.loads(container(root, name))
+    inspected[0]["NetworkSettings"] = {"Networks": {"offbox": {"IPAddress": "10.89.0.2"}}}
+    events: list[str] = []
+
+    class ObservedRunner(FakeRunner):
+        def start_stream(
+            self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+        ) -> StreamProcess:
+            with host_operation(paths, "recorded"):
+                events.append("user")
+            return super().start_stream(argv, env=env, stdin=stdin, tty=tty)
+
+    runner = ObservedRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["ssh", "offbox-recorded"], stdout=json.dumps(inspected)),
+            Script(prefix=["ssh", "offbox-recorded"], stdout=json.dumps(inspected)),
+            Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=200)"),
+            Script(prefix=["ssh", "-O", "forward"]),
+            Script(prefix=["ssh"], method="start_stream", returncode=42),
+        ]
+    )
+
+    def flush(self: SyncManager, work: Worktree, host: HostState | None = None) -> None:
+        events.append("flush")
+
+    def install(
+        self: Executor,
+        work: Worktree,
+        host: HostState,
+        config: InstallConfig,
+        *,
+        always: bool = False,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
+        events.append("install")
+        assert len(runner.calls) == 2
+
+    monkeypatch.setattr(SyncManager, "flush", flush)
+    monkeypatch.setattr(Executor, "install", install)
+    assert Executor(paths, runner).execute(ExecOptions(command=["pytest"]), cwd=root) == 42
+    assert events == ["flush", "install", "user"]
+    assert runner.calls[-2].argv == ["ssh", "-O", "forward", "-L", "127.0.0.1:8000:10.89.0.2:8000", "offbox-recorded"]
+    assert StateStore(paths.state).read().envs[name].active_forwards == [8000]

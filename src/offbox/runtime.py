@@ -19,6 +19,7 @@ from offbox.host import host_operation, select_host
 from offbox.host.ready import Clock, SystemClock
 from offbox.naming import Worktree, find_worktree, validate_env_name
 from offbox.paths import Paths
+from offbox.ports import PortManager
 from offbox.runner import Result, Runner
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, StateStore
@@ -259,6 +260,7 @@ class Runtime:
         self.clock = clock or SystemClock()
         self.store = StateStore(paths.state)
         self.sync = SyncManager(runner)
+        self.ports = PortManager(paths, runner)
 
     def remote(self, host: HostState, argv: Sequence[str], *, check: bool = True, timeout: float = 30, input: str | None = None) -> Result:
         result = self.runner.run(ssh_argv(host.name, argv), check=False, timeout=timeout, input=input)
@@ -362,7 +364,12 @@ class Runtime:
             if existing is not None:
                 self._owned(work, existing)
             with self.store.transaction() as state:
-                if state.hosts.get(host.name) != host or state.envs.get(work.name) != previous:
+                stored_host = state.hosts.get(host.name)
+                if (
+                    stored_host is None
+                    or stored_host.model_dump(exclude={"control_master_pid"}) != host.model_dump(exclude={"control_master_pid"})
+                    or state.envs.get(work.name) != previous
+                ):
                     raise PreconditionError("Environment or host changed while preparing up", "Retry offbox up.")
                 env = previous or EnvState(name=work.name, host=host.name, worktree_path=work.root, created_at=datetime.now(UTC))
                 state.envs[env.name] = env
@@ -375,6 +382,7 @@ class Runtime:
                 command[-1] = built.tag
             if fresh:
                 self.sync.pause(work, host)
+                self.ports.cancel(work, host)
             result = self.mutate(host, work, "fresh" if fresh else "up", command, pull=dockerfile is None)
             container = self._container(result.stdout)
             self._owned(work, container)
@@ -383,6 +391,9 @@ class Runtime:
                 self.sync.ensure(work, host, project.sync)
             self.sync.flush(work, host)
             Executor(self.paths, self.runner, clock=self.clock).up_stages(work, host, project, no_stack=no_stack)
+            ports = self.ports.restore(work, host, project.ports)
+            for forward in ports.forwards:
+                console.info(f"localhost:{forward.local} → {forward.env}:{forward.remote}")
             if built is not None and built.digest != container.image:
                 console.warn("Custom image changed; run offbox up --fresh to use it. Existing Docker data is retained.")
             env.image_digest = container.image
@@ -534,13 +545,21 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
     def _check_record(self, work: Worktree, env: EnvState, host: HostState) -> None:
         state = self.store.read()
         current = state.envs.get(work.name)
-        if state.hosts.get(host.name) != host or current is None or current.host != env.host or current.worktree_path != work.root:
+        stored_host = state.hosts.get(host.name)
+        if (
+            stored_host is None
+            or stored_host.model_dump(exclude={"control_master_pid"}) != host.model_dump(exclude={"control_master_pid"})
+            or current is None
+            or current.host != env.host
+            or current.worktree_path != work.root
+        ):
             raise PreconditionError("Environment changed while preparing the operation", "Run offbox list and retry.")
 
     def stop(self, *, cwd: Path | None = None) -> None:
         work, env, host = self.current(cwd)
         with host_operation(self.paths, host.name):
             self._check_record(work, env, host)
+            self.ports.cancel(work, host)
             self.sync.pause(work, host)
             self.mutate(host, work, "stop")
         console.success(f"Stopped {work.name}; data retained")
@@ -552,6 +571,8 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
             or (registered and current.host != host.name)
         ):
             raise PreconditionError("Environment registration changed before cleanup", "Review offbox list and run cleanup again.")
+        if current is not None and current.host == host.name:
+            self.ports.cancel(work, host)
         if current is None or current.host == host.name:
             self.sync.terminate(work, host)
         self.mutate(host, work, "remove")
