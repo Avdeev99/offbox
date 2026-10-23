@@ -4,7 +4,7 @@
 
 ## Commands
 
-Use uv for Python tooling. Run `uv sync --frozen` to install locked dependencies. Before pushing, run `make check` and `make test`. Use `make fmt` for formatting and lint fixes and `uv build` for distributions. Validation uses unit tests; do not add paid cloud or end-to-end tests.
+Use uv for Python tooling. Run `uv sync --frozen` to install locked dependencies. Before pushing, run `make check` and `make test`. Use `make fmt` for formatting and lint fixes and `uv build` for distributions. Validation uses deterministic unit tests, static checks, builds and one focused Linux Docker/SSH smoke job. Do not create billable resources or add real-cloud tests.
 
 ## Code rules
 
