@@ -17,6 +17,7 @@ from pydantic import Field, SecretStr
 from offbox import console
 from offbox.config import InstallConfig, Model, ProjectConfig, load_config
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError, UsageError
+from offbox.host import host_operation
 from offbox.host.ready import Clock, SystemClock
 from offbox.logging import register_secrets
 from offbox.naming import Worktree, validate_env_name
@@ -413,6 +414,8 @@ class Executor:
         if not options.no_sync:
             runtime.sync.flush(work, host)
         self.install(work, host, project.install, env=env)
+        with host_operation(self.paths, host.name):
+            runtime.ports.restore(work, host, project.ports)
         return self.run(
             work,
             host,

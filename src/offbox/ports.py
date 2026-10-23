@@ -16,7 +16,7 @@ from offbox.host import host_operation
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.runner import Result, Runner
-from offbox.ssh import ssh_argv
+from offbox.ssh import master_pid, ssh_argv
 from offbox.state import EnvState, HostState, State, StateStore
 
 logger = logging.getLogger(__name__)
@@ -175,33 +175,17 @@ class PortManager:
             raise error
 
     def _master(self, host: HostState, *, start: bool = True) -> int | None:
-        result = self._mux(["ssh", "-O", "check", f"offbox-{host.name}"])
-        created = result.returncode != 0
-        if created:
-            diagnostics = [line.strip() for line in result.stderr.splitlines() if line.strip()]
-            if not diagnostics or not all(
-                re.fullmatch(r"Control socket connect\(.+\): (No such file or directory|Connection refused)", line) for line in diagnostics
-            ):
-                raise ConnectionError_(
-                    f"Cannot check SSH master for {host.name}: {result.stderr.strip()}",
-                    f"Check SSH configuration and control socket permissions for offbox-{host.name}, then retry offbox ports.",
-                )
+        pid = master_pid(self.runner, host.name)
+        created = pid is None
         if created and start:
             started = self._mux(["ssh", "-fN", f"offbox-{host.name}"])
             if started.returncode:
                 raise ConnectionError_(
                     f"Cannot start SSH master for {host.name}", f"Check offbox host ssh {host.name} and retry offbox ports."
                 )
-            result = self._mux(["ssh", "-O", "check", f"offbox-{host.name}"])
-        if result.returncode:
-            if start:
-                raise ConnectionError_(f"SSH master for {host.name} is unavailable", "Check SSH connectivity and retry offbox ports.")
-            pid = None
-        else:
-            match = re.search(r"Master running \(pid=([1-9][0-9]*)\)", result.stderr + "\n" + result.stdout)
-            if match is None:
-                raise PreconditionError("Cannot identify the SSH master", "Check OpenSSH multiplexing output and run offbox ports again.")
-            pid = int(match[1])
+            pid = master_pid(self.runner, host.name)
+        if pid is None and start:
+            raise ConnectionError_(f"SSH master for {host.name} is unavailable", "Check SSH connectivity and retry offbox ports.")
         with self.store.transaction() as state:
             stored = self._host(state, host)
             if created or stored.control_master_pid != pid:
@@ -349,6 +333,9 @@ class PortManager:
     def _restore(self, work: Worktree, host: HostState, config: PortsConfig) -> PortsReport:
         self._env(self.store.read(), work, host)
         desired = self._desired(work, host, config)
+        current = self._env(self.store.read(), work, host)
+        if not desired and not current.local_ports:
+            return self.report(current)
         ip = self._ip(work, host)
         pid = self._master(host)
         if pid is None:

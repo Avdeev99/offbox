@@ -358,7 +358,7 @@ def test_create_pins_host_and_persists_ready_default_then_destroy_cleans(tmp_pat
             Script(prefix=["tofu", "apply"]),
             Script(prefix=["tofu", "output"], stdout='{"ip":{"value":"192.0.2.1"},"ssh_user":{"value":"offbox"}}'),
             Script(prefix=["ssh", "-o"], stdout=""),
-            Script(prefix=["ssh", "-O", "check"], returncode=1),
+            Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
             Script(prefix=["tofu", "destroy"]),
         ]
     )
@@ -603,3 +603,159 @@ def test_mutagen_termination_failure_is_not_hidden() -> None:
     runner = FakeRunner([Script(prefix=["mutagen"], returncode=1, stderr="daemon permission denied")])
     with pytest.raises(CommandFailed, match="daemon permission denied"):
         SyncManager(runner).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))
+
+
+@pytest.mark.parametrize("failure", ["check", "exit"])
+def test_destroy_keeps_forward_ownership_and_provider_workspace_when_master_cleanup_fails(tmp_path: Path, failure: str) -> None:
+    from datetime import UTC, datetime
+    from ipaddress import IPv4Address
+
+    from offbox.host.destroy import destroy_host
+    from offbox.state import EnvState, HostState, State, StateStore
+
+    paths = paths_at(tmp_path)
+    workspace = paths.state / "hosts/main/tofu"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="custom"\ndescription="test"\ndriver="tofu"\n')
+    host = HostState(
+        name="main",
+        provider="custom",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+        control_master_pid=100,
+    )
+    env = EnvState(
+        name="app-abcd",
+        host="main",
+        worktree_path=tmp_path / "repo",
+        created_at=datetime.now(UTC),
+        local_ports={8000: 8000},
+        active_forwards=[8000],
+        forward_ip=IPv4Address("10.89.0.2"),
+    )
+    StateStore(paths.state).write(State(hosts={"main": host}, envs={env.name: env}))
+    runner = FakeRunner(
+        [
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(
+                prefix=["ssh", "-O", "check"],
+                returncode=255 if failure == "check" else 0,
+                stderr="Control socket connect(/tmp/control): Permission denied" if failure == "check" else "Master running (pid=100)",
+            ),
+            *(
+                [Script(prefix=["ssh", "-O", "exit"], returncode=255, stderr="Master refused termination request")]
+                if failure == "exit"
+                else []
+            ),
+        ]
+    )
+    with pytest.raises(ConnectionError_):
+        destroy_host(paths, runner, "main", executable=Path("tofu"))
+    state = StateStore(paths.state).read()
+    assert state.hosts[host.name] == host
+    assert state.envs[env.name] == env
+    assert workspace.is_dir()
+    assert not any(call.argv[0] == "tofu" for call in runner.calls)
+
+
+def test_destroy_releases_global_state_lock_and_preserves_other_hosts_concurrent_update(tmp_path: Path) -> None:
+    import fcntl
+    from collections.abc import Mapping, Sequence
+    from datetime import UTC, datetime
+
+    from offbox.host.destroy import destroy_host
+    from offbox.runner import Result
+    from offbox.state import HostState, State, StateStore
+
+    paths = paths_at(tmp_path)
+    workspace = paths.state / "hosts/main/tofu"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="custom"\ndescription="test"\ndriver="tofu"\n')
+    host = HostState(
+        name="main",
+        provider="custom",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+    )
+    other = host.model_copy(update={"name": "other", "address": "192.0.2.2"})
+    store = StateStore(paths.state)
+    store.write(State(hosts={"main": host, "other": other}, default_host="main"))
+
+    class ConcurrentRunner(FakeRunner):
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            check: bool = True,
+            capture: bool = True,
+            input: str | None = None,
+            env: Mapping[str, str] | None = None,
+            cwd: Path | None = None,
+            timeout: float | None = None,
+        ) -> Result:
+            with store.lock_path.open("a") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            if argv[0] == "tofu":
+                with store.transaction() as state:
+                    state.hosts["other"].address = "192.0.2.3"
+                    state.default_host = "other"
+            return super().run(argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout)
+
+    runner = ConcurrentRunner(
+        [
+            Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=100)"),
+            Script(prefix=["ssh", "-O", "exit"], stderr="Exit request sent."),
+            Script(prefix=["tofu", "destroy"]),
+        ]
+    )
+    destroy_host(paths, runner, "main", executable=Path("tofu"))
+    state = store.read()
+    assert set(state.hosts) == {"other"}
+    assert state.hosts["other"].address == "192.0.2.3"
+    assert state.default_host == "other"
+    assert [call.argv for call in runner.calls][:2] == [["ssh", "-O", "check", "offbox-main"], ["ssh", "-O", "exit", "offbox-main"]]
+
+
+def test_existing_host_destroy_keeps_state_when_recreated_master_cannot_close(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from offbox.host.destroy import destroy_host
+    from offbox.state import HostState, State, StateStore
+
+    paths = paths_at(tmp_path)
+    workspace = paths.state / "hosts/main/provider"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="ssh"\ndescription="existing"\ndriver="none"\n')
+    host = HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+    )
+    StateStore(paths.state).write(State(hosts={"main": host}, default_host="main"))
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
+            Script(prefix=["ssh", "offbox-main"]),
+            Script(prefix=["ssh", "offbox-main"]),
+            Script(prefix=["ssh", "offbox-main"], returncode=1),
+            Script(prefix=["ssh", "offbox-main"]),
+            Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=200)"),
+            Script(prefix=["ssh", "-O", "exit"], returncode=255, stderr="Master refused termination request"),
+        ]
+    )
+    with pytest.raises(ConnectionError_, match="Cannot close SSH master"):
+        destroy_host(paths, runner, "main")
+    assert StateStore(paths.state).read().hosts[host.name] == host
+    assert workspace.is_dir()
+    assert runner.scripts == []

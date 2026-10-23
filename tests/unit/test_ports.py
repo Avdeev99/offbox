@@ -8,17 +8,17 @@ import pytest
 
 from offbox.config import PortsConfig
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
-from offbox.naming import Worktree
+from offbox.naming import Worktree, worktree_name
 from offbox.paths import Paths
 from offbox.ports import ForwardSpec, PortManager, PortsReport, allocate_port, forwarding_command, parse_compose
-from offbox.runner import FakeRunner, Script
+from offbox.runner import FakeRunner, Runner, Script
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, State, StateStore
 
 
 def setup(root: Path, *, mapping: dict[int, int] | None = None, active: bool = False) -> tuple[Paths, Worktree, HostState]:
     paths = Paths(root / "config", root / "state", root / "cache", root / "control")
-    work = Worktree(root=root / "one", name="one-abcd")
+    work = Worktree(root=root / "one", name=worktree_name(root / "one"))
     work.root.mkdir()
     host = HostState(
         name="main",
@@ -543,3 +543,86 @@ def test_cross_host_reservations_and_swap_preserve_remote_ownership(tmp_path: Pa
     assert state.envs[work.name].local_ports == {8000: 8000}
     assert state.envs[other.name].local_ports == {3000: 8001}
     assert runner.calls[-1].argv == ["ssh", "-O", "forward", "-L", "127.0.0.1:8001:10.89.0.4:3000", "offbox-other"]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_ports_cli_restores_and_emits_only_requested_format(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, json_output: bool) -> None:
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+    from offbox.runtime import Runtime
+
+    paths, work, host = setup(tmp_path)
+    (work.root / "offbox.toml").write_text("[ports]\nforward=[8000]\nauto=false\n")
+    runner = FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(work.root)),
+            inspect_script(work, host),
+            master(),
+            Script(prefix=forwarding_command("forward", spec(work))),
+        ]
+    )
+    runtime = Runtime(paths, runner)
+    runtime.ports = PortManager(paths, runner, probe=lambda _port: True)
+
+    def selected_runtime(_paths: Paths, _runner: Runner) -> Runtime:
+        return runtime
+
+    monkeypatch.setattr("offbox.cli.ports.Paths.discover", lambda: paths)
+    monkeypatch.setattr("offbox.cli.ports.Runtime", selected_runtime)
+    result = CliRunner().invoke(app, ["ports", *(["--json"] if json_output else [])])
+    assert result.exit_code == 0
+    if json_output:
+        assert PortsReport.model_validate_json(result.stdout) == runtime.ports.report(StateStore(paths.state).read().envs[work.name])
+    else:
+        assert result.stdout == f"localhost:8000 → {work.name}:8000\n"
+    assert result.stderr == ""
+    assert runner.scripts == []
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_ports_cli_swap_reconciles_desired_ports_before_acquiring_its_own_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: bool
+) -> None:
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+    from offbox.host import host_operation
+    from offbox.runtime import Runtime
+
+    paths, work, host = setup(tmp_path, mapping=None if configured else {8000: 8000}, active=not configured)
+    (work.root / "offbox.toml").write_text(f"[ports]\nforward={'[8000]' if configured else '[]'}\nauto=false\n")
+    runner = FakeRunner(
+        [
+            Script(prefix=["git"], stdout=str(work.root)),
+            inspect_script(work, host),
+            master(),
+            Script(prefix=forwarding_command("forward" if configured else "cancel", spec(work))),
+        ]
+    )
+    runtime = Runtime(paths, runner)
+    runtime.ports = PortManager(paths, runner, probe=lambda _port: True)
+
+    def selected_runtime(_paths: Paths, _runner: Runner) -> Runtime:
+        return runtime
+
+    monkeypatch.setattr("offbox.cli.ports.Paths.discover", lambda: paths)
+    monkeypatch.setattr("offbox.cli.ports.Runtime", selected_runtime)
+    if configured:
+
+        def swap(self: PortManager, selected: Worktree, remote: int) -> PortsReport:
+            assert remote == 8000
+            with host_operation(paths, host.name):
+                env = StateStore(paths.state).read().envs[selected.name]
+                assert env.local_ports == {8000: 8000}
+                assert env.active_forwards == [8000]
+                return self.report(env)
+
+        monkeypatch.setattr(PortManager, "swap", swap)
+    result = CliRunner().invoke(app, ["ports", "--swap", "8000"])
+    assert result.exit_code == (0 if configured else 3)
+    assert StateStore(paths.state).read().envs[work.name].local_ports == ({8000: 8000} if configured else {})
+    if not configured:
+        assert "Remote port is not mapped" in result.stderr
+        assert result.stdout == ""
+    assert runner.scripts == []
