@@ -1,0 +1,14 @@
+[env]
+cpus = 1
+memory = "2g"
+
+[install]
+command = "npm ci && npx playwright install chromium"
+when = ["package-lock.json"]
+
+[stack]
+up = "docker compose up -d --wait"
+
+[ports]
+forward = [3000]
+auto = true

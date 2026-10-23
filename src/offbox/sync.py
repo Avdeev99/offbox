@@ -20,7 +20,6 @@ from offbox.state import HostState
 logger = logging.getLogger(__name__)
 
 DEFAULT_IGNORES = (
-    ".git",
     "node_modules",
     ".venv",
     "venv",
@@ -36,6 +35,7 @@ DEFAULT_IGNORES = (
     "target",
     ".terraform",
     ".DS_Store",
+    ".git",
 )
 SyncState = Literal[
     "disconnected",
@@ -162,7 +162,7 @@ def health(session: SyncSession) -> SyncHealth:
 def ignores(config: SyncConfig) -> list[str]:
     if any(not pattern or any(character in pattern for character in "\x00\r\n") for pattern in config.ignore):
         raise PreconditionError("Invalid sync ignore pattern", "Set sync.ignore to nonempty, single-line patterns without NUL characters.")
-    return list(dict.fromkeys([*DEFAULT_IGNORES, *config.ignore]))
+    return [*dict.fromkeys(pattern for pattern in (*DEFAULT_IGNORES, *config.ignore) if pattern != ".git"), ".git"]
 
 
 def _csv_pattern(pattern: str) -> str:

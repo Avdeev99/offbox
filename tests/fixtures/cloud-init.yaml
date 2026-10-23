@@ -12,4 +12,4 @@ write_files:
     permissions: "0700"
     content: "#!/bin/sh\nset -eu\n"
 runcmd:
-  - ["env", "OFFBOX_HARDEN=1", "OFFBOX_VERSION=0.0.1", "/usr/local/sbin/offbox-host-init", "ghcr.io/avdeev99/offbox-universal:1", "ssh-ed25519 AAAA user"]
+  - ["env", "OFFBOX_HARDEN=1", "OFFBOX_VERSION=0.1.0", "/usr/local/sbin/offbox-host-init", "ghcr.io/avdeev99/offbox-universal:1", "ssh-ed25519 AAAA user"]

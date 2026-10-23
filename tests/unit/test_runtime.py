@@ -70,7 +70,7 @@ def test_exact_container_command_and_labelled_volume() -> None:
         "--label",
         "offbox.worktree=/src/project",
         "--label",
-        "offbox.version=0.0.1",
+        "offbox.version=0.1.0",
         "registry/image:tag",
     ]
     assert volume_command(work) == [
@@ -82,7 +82,7 @@ def test_exact_container_command_and_labelled_volume() -> None:
         "--label",
         "offbox.worktree=/src/project",
         "--label",
-        "offbox.version=0.0.1",
+        "offbox.version=0.1.0",
         "offbox-project-abcd-docker",
     ]
 

@@ -1,0 +1,15 @@
+services:
+  web:
+    image: node:22-bookworm-slim
+    user: "1000:1000"
+    working_dir: /work
+    volumes:
+      - .:/work
+    ports:
+      - "3000:3000"
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

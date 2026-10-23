@@ -9,5 +9,5 @@ def test_version_writes_only_the_version_to_stdout(arguments: tuple[str, ...]) -
     result = CliRunner().invoke(app, arguments)
 
     assert result.exit_code == 0
-    assert result.stdout == "0.0.1\n"
+    assert result.stdout == "0.1.0\n"
     assert result.stderr == ""

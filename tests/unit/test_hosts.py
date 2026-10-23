@@ -136,7 +136,7 @@ def test_cloud_init_snapshot() -> None:
     rendered = render_cloud_init("ssh-ed25519 AAAA user", "PRIVATE\nKEY\n", "ssh-ed25519 BBBB host", script="#!/bin/sh\nset -eu\n")
     assert rendered == (Path(__file__).parents[1] / "fixtures/cloud-init.yaml").read_text()
     assert "OFFBOX_HARDEN=1" in rendered
-    assert "OFFBOX_VERSION=0.0.1" in rendered
+    assert "OFFBOX_VERSION=0.1.0" in rendered
 
 
 def test_failed_apply_is_retained_for_destroy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -261,7 +261,7 @@ def test_existing_host_bootstrap_is_nonhardening_and_pinned(tmp_path: Path) -> N
     assert StateStore(paths.state).read().default_host == "main"
     bootstrap = runner.calls[-2]
     assert "OFFBOX_HARDEN=0" in bootstrap.argv[-1]
-    assert "OFFBOX_VERSION=0.0.1" in bootstrap.argv[-1]
+    assert "OFFBOX_VERSION=0.1.0" in bootstrap.argv[-1]
     assert "sudo -n env" in bootstrap.argv[-1]
     assert "StrictHostKeyChecking=yes" in bootstrap.argv
     assert bootstrap.input is not None and "OFFBOX_HARDEN" in bootstrap.input

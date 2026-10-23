@@ -1,0 +1,72 @@
+name: Docker smoke
+
+on:
+  pull_request:
+  push:
+    branches: [master, "codex/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Native architecture and scripts
+        shell: bash
+        run: |
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          shellcheck tests/smoke/*.sh
+          tests/smoke/test-guards.sh
+      - name: Current-checkout image tag
+        id: image
+        env:
+          PYTHONPATH: src
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from offbox import DEFAULT_IMAGE
+
+          repository, _ = DEFAULT_IMAGE.rsplit(":", 1)
+          tag = f"{repository}-smoke:{os.environ['GITHUB_SHA']}"
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write(f"tag={tag}\n")
+          PY
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build and load current universal image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: images/universal/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ steps.image.outputs.tag }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Real SSH, sync, execution and isolated Compose stacks
+        env:
+          SMOKE_BASE_IMAGE: ${{ steps.image.outputs.tag }}
+          SMOKE_FIXTURE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: tests/smoke/run.sh run "$SMOKE_FIXTURE_ID" "$SMOKE_BASE_IMAGE"
+      - name: Always clean owned fixture resources
+        if: always()
+        env:
+          SMOKE_FIXTURE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: tests/smoke/run.sh cleanup "$SMOKE_FIXTURE_ID"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: docker-smoke-report
+          path: ${{ runner.temp }}/offbox-smoke-${{ github.run_id }}-${{ github.run_attempt }}/artifacts/
+          if-no-files-found: warn
+          retention-days: 7

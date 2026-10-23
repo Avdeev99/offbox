@@ -39,8 +39,12 @@ packages = ["src/offbox"]
 "providers" = "offbox/_data/providers"
 
 [tool.hatch.build.targets.sdist]
+exclude = [
+    "**/node_modules/**", "**/.venv/**", "**/dist/**",
+    "**/playwright-report/**", "**/test-results/**",
+]
 include = [
-    "/src", "/tests", "/host", "/images", "/providers",
+    "/src", "/tests", "/host", "/images", "/providers", "/docs", "/examples",
     "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE",
     "/CONTRIBUTING.md", "/CHANGELOG.md", "/AGENTS.md", "/Makefile",
     "/.pre-commit-config.yaml", "/RTK.md",
