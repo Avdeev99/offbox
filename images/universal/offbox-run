@@ -1,0 +1,127 @@
+#!/bin/sh
+set -eu
+umask 077
+
+fail() {
+    printf 'offbox-run: %s\n  Fix: %s\n' "$1" "$2" >&2
+    exit 2
+}
+
+validate_id() {
+    case "$1" in ''|*[!A-Za-z0-9_-]*) fail 'Invalid run ID.' 'Use a unique alphanumeric run ID without path separators.' ;; esac
+    [ "${#1}" -le 64 ] || fail 'Run ID is too long.' 'Use at most 64 characters.'
+}
+
+process_info() {
+    if [ -r "/proc/$1/stat" ]; then
+        sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $3, $20}'
+    fi
+}
+
+state_dir=/run/offbox/exec
+mkdir -p "$state_dir"
+if [ "${1:-}" = --signal ]; then
+    [ "$#" -eq 3 ] || fail 'Expected --signal SIGNAL ID.' 'Pass INT, TERM or KILL and the recorded run ID.'
+    signal=$2
+    run_id=$3
+    case "$signal" in INT|TERM|KILL) ;; *) fail 'Unsupported signal.' 'Use INT, TERM or KILL.' ;; esac
+    validate_id "$run_id"
+    [ ! -f "$state_dir/$run_id.code" ] || exit 0
+    [ ! -f "$state_dir/$run_id.tty" ] || fail 'External group signaling is unavailable for TTY runs.' 'Use terminal controls for a TTY command.'
+    if [ ! -f "$state_dir/$run_id.pid" ] || [ ! -f "$state_dir/$run_id.start" ]; then
+        fail 'Run metadata is unavailable.' 'Check the run status before retrying.'
+    fi
+    pid=$(cat "$state_dir/$run_id.pid")
+    started=$(cat "$state_dir/$run_id.start")
+    case "$pid:$started" in *[!0-9:]*|:*|*:) fail 'Invalid process metadata.' 'Check the run status before retrying.' ;; esac
+    [ "$pid" -gt 1 ] || fail 'Unsafe process group.' 'Check the run status before retrying.'
+    actual=$(process_info "$pid")
+    [ "$actual" = "$pid $started" ] || fail 'Run process group no longer matches its recorded identity.' 'Check the run status; do not signal a reused PID.'
+    /bin/kill -s "$signal" -- "-$pid"
+    exit 0
+fi
+
+tty=0
+if [ "${1:-}" = --tty ]; then
+    tty=1
+    shift
+fi
+[ "$#" -ge 4 ] || fail 'Expected ID CWD -- COMMAND.' 'Pass the run ID, absolute work directory and command argv.'
+run_id=$1
+directory=$2
+shift 2
+[ "$1" = -- ] || fail 'Missing command separator.' 'Put -- before the command argv.'
+shift
+validate_id "$run_id"
+case "$directory" in /*) ;; *) fail 'Work directory must be absolute.' 'Use the mapped /work directory.' ;; esac
+if [ -e "$state_dir/$run_id.pid" ] || [ -e "$state_dir/$run_id.code" ]; then
+    fail 'Run ID already exists.' 'Use a new run ID.'
+fi
+find "$state_dir" -maxdepth 1 -type f -mmin +1440 -print | while IFS= read -r expired; do
+    expired_name=${expired##*/}
+    case "$expired_name" in
+        *.code.tmp) expired_id=${expired_name%.code.tmp} ;;
+        *.code|*.pid|*.start|*.tty) expired_id=${expired_name%.*} ;;
+        *) continue ;;
+    esac
+    case "$expired_id" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+    if [ -f "$state_dir/$expired_id.code" ] && [ "$expired_name" != "$expired_id.code" ]; then
+        continue
+    fi
+    expired_pid=$(cat "$state_dir/$expired_id.pid" 2>/dev/null || :)
+    expired_start=$(cat "$state_dir/$expired_id.start" 2>/dev/null || :)
+    case "$expired_pid:$expired_start" in
+        *[!0-9:]*|:*|*:) ;;
+        *)
+            expired_identity=$(process_info "$expired_pid")
+            if [ ! -f "$state_dir/$expired_id.code" ] && [ -n "$expired_identity" ] && [ "${expired_identity##* }" = "$expired_start" ]; then
+                continue
+            fi
+            ;;
+    esac
+    rm -f "$state_dir/$expired_id.code" "$state_dir/$expired_id.pid" "$state_dir/$expired_id.start" "$state_dir/$expired_id.tty" "$state_dir/$expired_id.code.tmp"
+done
+cd "$directory" || fail 'Cannot enter the work directory.' 'Flush sync and check that the remote directory exists.'
+child_pid=
+pending_signal=
+forward_signal() {
+    pending_signal=$1
+    if [ -n "$child_pid" ]; then
+        if [ "$tty" = 1 ]; then
+            [ "$1" != INT ] || return 0
+            /bin/kill -s "$1" "$child_pid" 2>/dev/null || :
+        else
+            /bin/kill -s "$1" -- "-$child_pid" 2>/dev/null || /bin/kill -s "$1" "$child_pid" 2>/dev/null || :
+        fi
+    fi
+}
+trap 'forward_signal INT' INT
+trap 'forward_signal TERM' TERM
+trap 'forward_signal HUP' HUP
+exec 3<&0
+if [ "$tty" = 1 ]; then
+    touch "$state_dir/$run_id.tty"
+    env --default-signal=INT,TERM,HUP -- "$@" <&3 3<&- &
+else
+    setsid env --default-signal=INT,TERM,HUP -- "$@" <&3 3<&- &
+fi
+child_pid=$!
+exec 3<&-
+identity=$(process_info "$child_pid")
+printf '%s\n' "${identity##* }" > "$state_dir/$run_id.start"
+printf '%s\n' "$child_pid" > "$state_dir/$run_id.pid"
+if [ -n "$pending_signal" ]; then
+    forward_signal "$pending_signal"
+fi
+while :; do
+    if wait "$child_pid"; then
+        status=0
+    else
+        status=$?
+    fi
+    kill -0 "$child_pid" 2>/dev/null || break
+done
+child_pid=
+printf '%s\n' "$status" > "$state_dir/$run_id.code.tmp"
+mv "$state_dir/$run_id.code.tmp" "$state_dir/$run_id.code"
+exit "$status"
