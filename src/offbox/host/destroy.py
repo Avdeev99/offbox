@@ -15,6 +15,18 @@ from offbox.state import StateStore
 from offbox.tools import ToolDiscovery
 
 
+def terminate_sync(runner: Runner, name: str) -> None:
+    try:
+        result = runner.run(["mutagen", "sync", "terminate", f"offbox-{name}"], check=False, timeout=30)
+    except PreconditionError as exc:
+        if isinstance(exc.__cause__, FileNotFoundError) and shutil.which("mutagen") is None:
+            console.warn("Mutagen is not installed; continuing host cleanup without session termination.")
+            return
+        raise
+    if result.returncode and not any(text in result.stderr.lower() for text in ("not found", "no sessions")):
+        raise CommandFailed(result.argv, result.returncode, result.stderr)
+
+
 def _destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, executable: Path | None = None) -> None:
     host = select_host(paths, name)
     validate_name(host.name)
@@ -35,9 +47,7 @@ def _destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, exec
         for env in envs:
             if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,36}", env.name) is None:
                 raise PreconditionError("Invalid stored environment name", "Repair the environment state before destroying its host.")
-            result = runner.run(["mutagen", "sync", "terminate", f"offbox-{env.name}"], check=False, timeout=30)
-            if result.returncode and not any(text in result.stderr.lower() for text in ("not found", "no sessions")):
-                raise CommandFailed(result.argv, result.returncode, result.stderr)
+            terminate_sync(runner, env.name)
         if host.address:
             master = runner.run(["ssh", "-O", "check", f"offbox-{host.name}"], check=False, timeout=5)
             if master.returncode == 0:

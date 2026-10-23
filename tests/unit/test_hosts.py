@@ -573,3 +573,31 @@ def test_host_ssh_separator_preserves_exact_remote_arguments(
     result = CliRunner().invoke(app, ["host", "ssh", *name_arguments, "--", "printf", "%s", "a; touch /tmp/unwanted"])
     assert result.exit_code == 42
     assert calls == [["ssh", "offbox-main", "--", "printf %s 'a; touch /tmp/unwanted'"]]
+
+
+def test_missing_mutagen_does_not_strand_host_cleanup(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import subprocess
+
+    from offbox.host.destroy import terminate_sync
+    from offbox.runner import SubprocessRunner
+
+    def missing(_argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(2, "No such file or directory", "mutagen")
+
+    monkeypatch.setattr("offbox.runner.subprocess.run", missing)
+
+    def unavailable(_name: str) -> str | None:
+        return None
+
+    monkeypatch.setattr("offbox.host.destroy.shutil.which", unavailable)
+    terminate_sync(SubprocessRunner(), "project-abcd")
+    assert "Mutagen is not installed" in capsys.readouterr().err
+
+
+def test_mutagen_termination_failure_is_not_hidden() -> None:
+    from offbox.errors import CommandFailed
+    from offbox.host.destroy import terminate_sync
+
+    runner = FakeRunner([Script(prefix=["mutagen"], returncode=1, stderr="daemon permission denied")])
+    with pytest.raises(CommandFailed, match="daemon permission denied"):
+        terminate_sync(runner, "project-abcd")
