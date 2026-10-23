@@ -130,11 +130,14 @@ class Smoke:
         write_private(
             bin_dir / "docker",
             '#!/bin/sh\nset -eu\ncase "$1" in\n'
-            "container) printf '%s\\n' \"$OFFBOX_PROBE_INSPECTION\" ;;\n"
-            "exec) touch \"$OFFBOX_PROBE_EXECUTED\"; printf '[]\\n' ;;\n"
+            'container) cat "$OFFBOX_PROBE_INSPECTION" ;;\n'
+            'exec) touch "$OFFBOX_PROBE_EXECUTED"; cat "$OFFBOX_PROBE_COMPOSE" ;;\n'
             "*) exit 9 ;;\nesac\n",
         )
         (bin_dir / "docker").chmod(0o700)
+        inspection_file = directory / "inspection.json"
+        compose_file = directory / "compose.json"
+        compose_file.write_text("[]\n")
         for name, running, label in (("owned", True, "probe-abcd"), ("unowned", True, "other-abcd"), ("stopped", False, "probe-abcd")):
             executed = directory / f"executed-{name}"
             inspection = [
@@ -145,12 +148,14 @@ class Smoke:
                     "NetworkSettings": {"Networks": {"offbox": {"IPAddress": "10.89.0.2"}}},
                 }
             ]
+            inspection_file.write_text(json.dumps(inspection))
             result = self.runner.run(
                 ["sh", "-s", "--", "probe-abcd", str(work), "offbox-probe-abcd"],
                 input=PORT_DISCOVERY_SCRIPT,
                 env={
                     "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
-                    "OFFBOX_PROBE_INSPECTION": json.dumps(inspection),
+                    "OFFBOX_PROBE_INSPECTION": str(inspection_file),
+                    "OFFBOX_PROBE_COMPOSE": str(compose_file),
                     "OFFBOX_PROBE_EXECUTED": str(executed),
                 },
                 timeout=10,
@@ -158,6 +163,36 @@ class Smoke:
             snapshot = PortSnapshot.model_validate_json(result.stdout)
             require(executed.exists() == (name == "owned"), "Port discovery queried Compose before validating ownership/running state")
             require(snapshot.compose == ("[]" if name == "owned" else ""), "Port discovery returned unexpected Compose output")
+        for oversized in ("inspection", "compose"):
+            inspection_file.write_text(
+                json.dumps(
+                    [
+                        {
+                            "Name": "/offbox-probe-abcd",
+                            "State": {"Running": True},
+                            "Config": {"Labels": {"offbox.env": "probe-abcd", "offbox.worktree": str(work)}},
+                            "NetworkSettings": {"Networks": {"offbox": {"IPAddress": "10.89.0.2"}}},
+                            "LogPath": "x" * 200_000 if oversized == "inspection" else "",
+                        }
+                    ]
+                )
+            )
+            compose = json.dumps([{"Publishers": None, "Labels": "x" * 200_000 if oversized == "compose" else ""}])
+            compose_file.write_text(compose)
+            result = self.runner.run(
+                ["sh", "-s", "--", "probe-abcd", str(work), "offbox-probe-abcd"],
+                input=PORT_DISCOVERY_SCRIPT,
+                env={
+                    "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+                    "OFFBOX_PROBE_INSPECTION": str(inspection_file),
+                    "OFFBOX_PROBE_COMPOSE": str(compose_file),
+                    "OFFBOX_PROBE_EXECUTED": str(directory / "executed-large"),
+                },
+                timeout=10,
+            )
+            snapshot = PortSnapshot.model_validate_json(result.stdout)
+            require(snapshot.compose == compose, "Port discovery lost oversized Compose data")
+            require(snapshot.containers[0].state.running, "Port discovery lost oversized inspection data")
         self.complete("Batched probes preserve hash/marker contracts, refuse symlinks, and guard ownership before Compose execution")
 
     def prepare(self) -> None:

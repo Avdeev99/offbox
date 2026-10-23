@@ -71,6 +71,7 @@ def test_matching_hash_does_not_install_or_rewrite_marker(tmp_path: Path) -> Non
         "a" * 64 + "  -\ninvalid-marker",
         "a" * 64 + "  -\nmissing\nunexpected",
         "a" * 64 + "  -\n" + "b" * 63,
+        "a" * 64 + "  -\n " + "b" * 64,
     ],
 )
 def test_invalid_combined_probe_stops_before_install_or_marker_write(tmp_path: Path, response: str) -> None:
@@ -99,6 +100,17 @@ def test_changed_existing_marker_triggers_install(tmp_path: Path) -> None:
     assert runner.calls[1].method == "start_stream"
     assert "npm ci" in runner.calls[1].argv[-1]
     assert runner.calls[-1].argv[-1].endswith("a" * 64)
+
+
+@pytest.mark.parametrize("marker", ["", "\n", " \t\n"])
+def test_empty_marker_reports_marker_recovery_without_installing(tmp_path: Path, marker: str) -> None:
+    executor, work, host = context(tmp_path)
+    runner = FakeRunner([Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + marker)])
+    executor.runner = runner
+    with pytest.raises(PreconditionError, match="Invalid installation marker") as caught:
+        executor.install(work, host, InstallConfig(command="npm ci"))
+    assert caught.value.fix == "Remove the host .offbox/install.sha256 marker and retry."
+    assert len(runner.calls) == 1
 
 
 @pytest.mark.parametrize("status", [1, 42, 130, 143])

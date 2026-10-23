@@ -327,7 +327,7 @@ class Executor:
             raise ConnectionError_("SSH connection lost during installation setup", _CONNECTION_FIX)
         if result.returncode:
             raise CommandFailed(argv, result.returncode, result.stderr)
-        return result.stdout.strip()
+        return result.stdout
 
     @contextmanager
     def installation_lock(self, work: Worktree) -> Generator[None]:
@@ -356,7 +356,7 @@ class Executor:
             raise PreconditionError("Cannot acquire installation lock", "Check local state directory permissions and retry.") from exc
 
     def install_hash(self, work: Worktree, host: HostState, names: Sequence[str]) -> str:
-        result = self._remote(host, ["sh", "-s", "--", work.work, *install_paths(names)], input=_HASH)
+        result = self._remote(host, ["sh", "-s", "--", work.work, *install_paths(names)], input=_HASH).strip()
         match = re.fullmatch(r"([a-f0-9]{64})  -", result)
         if match is None:
             raise PreconditionError("Invalid remote install hash", "Check the host sha256sum command and retry.")
@@ -371,7 +371,7 @@ class Executor:
         if not separator or match is None:
             raise PreconditionError("Invalid remote install hash", "Check the host sha256sum command and retry.")
         try:
-            return InstallProbe(digest=match[1], marker=marker)
+            return InstallProbe(digest=match[1], marker=marker.rstrip())
         except ValidationError as exc:
             raise PreconditionError("Invalid installation marker", "Remove the host .offbox/install.sha256 marker and retry.") from exc
 

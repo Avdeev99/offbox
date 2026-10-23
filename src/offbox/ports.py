@@ -91,7 +91,8 @@ if printf '%s\n' "$inspection" | jq -e --arg name "$name" --arg worktree "$workt
 ' >/dev/null; then
     compose=$(docker exec -u dev -w /work "$container" docker compose ps --format json)
 fi
-jq -cn --argjson containers "$inspection" --arg compose "$compose" '{containers: $containers, compose: $compose}'
+compose_json=$(printf '%s' "$compose" | jq -Rs .)
+printf '%s\n%s\n' "$inspection" "$compose_json" | jq -cs '{containers: .[0], compose: .[1]}'
 """
 
 
