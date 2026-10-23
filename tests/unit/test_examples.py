@@ -44,8 +44,7 @@ def test_examples_install_before_stack_and_retain_failure(
     )
     work = Worktree(root=root, name="example-abcd")
     scripts = [
-        Script(prefix=["ssh"], stdout="a" * 64 + "  -\n"),
-        Script(prefix=["ssh"], stdout="missing"),
+        Script(prefix=["ssh"], stdout="a" * 64 + "  -\nmissing"),
         Script(prefix=["ssh"], method="start_stream", returncode=install_status),
     ]
     if install_status == 0:
@@ -66,11 +65,11 @@ def test_examples_install_before_stack_and_retain_failure(
         with pytest.raises(CommandFailed) as caught:
             executor.up_stages(work, host, project)
         assert caught.value.returncode == 23
-        assert len(runner.calls) == 3
+        assert len(runner.calls) == 2
     else:
         executor.up_stages(work, host, project)
-        assert len(runner.calls) == 6
-        assert runner.calls[4].argv[-1].endswith("b" * 64)
+        assert len(runner.calls) == 5
+        assert runner.calls[3].argv[-1].endswith("b" * 64)
     stages = [shlex.split(call.argv[-1]) for call in runner.calls if call.method == "start_stream"]
     assert [stage[:2] for stage in stages] == [["sh", "-c"]] * len(stages)
     assert [shlex.split(stage[-1])[-4:] for stage in stages] == [

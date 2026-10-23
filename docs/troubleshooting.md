@@ -4,6 +4,8 @@ Start with `offbox status` for this worktree and `offbox doctor` for local prere
 
 Daily logs live under `$XDG_STATE_HOME/offbox/logs` (default `~/.local/state/offbox/logs`). `offbox logs` selects today’s records for the current environment. Use `-v` to echo tool commands with known secret values redacted. Review logs before sharing them: project stdout/stderr and arbitrary file contents can contain secrets.
 
+For slow startup or execution, use `offbox --timings up` or `offbox --timings exec -- COMMAND` to separate sync, dependency checks, container/stack startup, forwarding and command time. The summary goes to stderr and excludes CLI startup. A slow no-op can reflect several sequential SSH operations; see the [measured Hetzner baseline](benchmarks/2026-10-23-hetzner.md).
+
 ## Recovery instruction reference
 
 Each entry below corresponds to a recovery instruction Offbox can print. `<host>`, `<path>`, `<session>` and similar placeholders stand for the concrete value in your diagnostic. Instructions shared by several errors appear once. Follow the actual diagnostic’s values. The instruction describes the next action; the preceding error message supplies its cause.

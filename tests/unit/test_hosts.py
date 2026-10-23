@@ -334,10 +334,13 @@ def test_public_key_rejects_stale_sidecar_before_provisioning(tmp_path: Path) ->
     assert runner.calls[0].argv == ["ssh-keygen", "-y", "-P", "", "-f", str(key)]
 
 
-def test_create_pins_host_and_persists_ready_default_then_destroy_cleans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("docker_exit", [0, 1])
+def test_create_refreshes_bootstrap_login_and_checks_docker_before_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, docker_exit: int
+) -> None:
     from offbox.host.create import CreateOptions, create_host
     from offbox.host.destroy import destroy_host
-    from offbox.state import StateStore
+    from offbox.state import HostState, StateStore
 
     paths = paths_at(tmp_path)
     key = tmp_path / "identity"
@@ -358,25 +361,50 @@ def test_create_pins_host_and_persists_ready_default_then_destroy_cleans(tmp_pat
             Script(prefix=["tofu", "apply"]),
             Script(prefix=["tofu", "output"], stdout='{"ip":{"value":"192.0.2.1"},"ssh_user":{"value":"offbox"}}'),
             Script(prefix=["ssh", "-o"], stdout=""),
+            Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=12345)"),
+            Script(prefix=["ssh", "-O", "exit"]),
+            Script(
+                prefix=["ssh", "offbox-main", "--", "docker info --format '{{.ServerVersion}}'"],
+                stdout="29.9.2",
+                returncode=docker_exit,
+                stderr="permission denied" if docker_exit else "",
+            ),
             Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
             Script(prefix=["tofu", "destroy"]),
         ]
     )
-    host = create_host(
-        paths,
-        runner,
-        CreateOptions(ssh_key=key),
-        executable=Path("tofu"),
-        clock=FakeClock(),
-        probe=lambda _a, _p, _t: True,
-        ssh_config=tmp_path / "ssh/config",
-    )
-    assert host.phase == "ready"
+
+    def provision() -> HostState:
+        return create_host(
+            paths,
+            runner,
+            CreateOptions(ssh_key=key),
+            executable=Path("tofu"),
+            clock=FakeClock(),
+            probe=lambda _a, _p, _t: True,
+            ssh_config=tmp_path / "ssh/config",
+        )
+
+    if docker_exit:
+        with pytest.raises(OffboxError, match="permission denied"):
+            provision()
+        host = StateStore(paths.state).read().hosts["main"]
+    else:
+        host = provision()
+    assert host.phase == ("initializing" if docker_exit else "ready")
     assert host.address == "192.0.2.1"
-    assert StateStore(paths.state).read().default_host == "main"
+    assert StateStore(paths.state).read().default_host == (None if docker_exit else "main")
     assert host.known_hosts_path.read_text() == "offbox-main ssh-ed25519 BBBB\n"
     assert "StrictHostKeyChecking yes" in (paths.config / "ssh_config").read_text()
-    assert not (host.known_hosts_path.parent / "ssh_host_ed25519_key").exists()
+    assert (host.known_hosts_path.parent / "ssh_host_ed25519_key").exists() == bool(docker_exit)
+    # Bootstrap grants Docker group membership after the readiness connection has opened.
+    # Retire that connection and verify Docker through a fresh login before declaring ready.
+    assert [call.argv for call in runner.calls][-4:] == [
+        ["ssh", "-o", "ConnectTimeout=3", "offbox-main", "--", "test -f /var/lib/offbox/ready"],
+        ["ssh", "-O", "check", "offbox-main"],
+        ["ssh", "-O", "exit", "offbox-main"],
+        ["ssh", "offbox-main", "--", "docker info --format '{{.ServerVersion}}'"],
+    ]
     destroy_host(paths, runner, "main", executable=Path("tofu"))
     assert StateStore(paths.state).read().hosts == {}
     assert StateStore(paths.state).read().default_host is None

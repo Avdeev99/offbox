@@ -15,8 +15,9 @@ from offbox.host.ready import Clock, SystemClock, tcp_probe, wait_ready
 from offbox.paths import Paths
 from offbox.providers import copy_provider, credentials_env, discover_provider, validate_name
 from offbox.runner import Runner
-from offbox.ssh import ensure_include, host_key_path, known_host, sync_config, write_private
+from offbox.ssh import close_master, ensure_include, host_key_path, known_host, ssh_argv, sync_config, write_private
 from offbox.state import HostState, StateStore
+from offbox.timings import stage
 from offbox.tools import ToolDiscovery
 
 
@@ -111,6 +112,11 @@ def _create_host(
             sync_config(paths, state)
             ensure_include(paths, ssh_config)
         wait_ready(host.name, host.address, host.ssh_port, runner, paths.log_file(), clock=timer, probe=probe)
+        # Readiness polling can authenticate before bootstrap adds the Docker group.
+        # A multiplexed connection retains that login's groups until it is replaced.
+        with stage("SSH refresh"):
+            close_master(runner, host.name)
+            runner.run(ssh_argv(host.name, ["docker", "info", "--format", "{{.ServerVersion}}"]), timeout=10)
         host.phase = "ready"
         with store.transaction() as state:
             state.hosts[host.name] = host

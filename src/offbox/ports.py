@@ -18,6 +18,7 @@ from offbox.paths import Paths
 from offbox.runner import Result, Runner
 from offbox.ssh import master_pid, ssh_argv
 from offbox.state import EnvState, HostState, State, StateStore
+from offbox.timings import measured
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,29 @@ class PortContainer(DockerModel):
     state: ContainerState = Field(alias="State")
     config: ContainerConfig = Field(alias="Config")
     network: ContainerNetworks = Field(alias="NetworkSettings")
+
+
+class PortSnapshot(Model):
+    containers: list[PortContainer]
+    compose: str
+
+
+PORT_DISCOVERY_SCRIPT = r"""set -eu
+name=$1
+worktree=$2
+container=$3
+inspection=$(docker container inspect "$container")
+compose=
+if printf '%s\n' "$inspection" | jq -e --arg name "$name" --arg worktree "$worktree" --arg container "$container" '
+    length == 1 and .[0].Name == ("/" + $container)
+    and .[0].Config.Labels["offbox.env"] == $name
+    and .[0].Config.Labels["offbox.worktree"] == $worktree
+    and .[0].State.Running == true
+' >/dev/null; then
+    compose=$(docker exec -u dev -w /work "$container" docker compose ps --format json)
+fi
+jq -cn --argjson containers "$inspection" --arg compose "$compose" '{containers: $containers, compose: $compose}'
+"""
 
 
 class ForwardSpec(Model):
@@ -195,8 +219,8 @@ class PortManager:
                 stored.control_master_pid = pid
         return pid
 
-    def _remote(self, host: HostState, argv: Sequence[str]) -> Result:
-        result = self.runner.run(ssh_argv(host.name, argv), check=False, timeout=15)
+    def _remote(self, host: HostState, argv: Sequence[str], *, input: str | None = None, timeout: float = 15) -> Result:
+        result = self.runner.run(ssh_argv(host.name, argv), check=False, timeout=timeout, input=input)
         if result.returncode == 255:
             raise ConnectionError_(f"Cannot reach host {host.name}", f"Check offbox host ssh {host.name} and retry.")
         self._checked(result, "Run offbox up and check the environment's Docker/Compose configuration.")
@@ -206,6 +230,14 @@ class PortManager:
         result = self._remote(host, ["docker", "container", "inspect", work.container])
         try:
             containers = TypeAdapter(list[PortContainer]).validate_json(result.stdout)
+        except ValidationError as exc:
+            raise PreconditionError(
+                "Invalid managed container network", "Inspect the offbox network and container ownership before retrying."
+            ) from exc
+        return self._container_ip(work, containers)
+
+    def _container_ip(self, work: Worktree, containers: Sequence[PortContainer]) -> IPv4Address:
+        try:
             if len(containers) != 1:
                 raise ValueError("Expected one managed container")
             container = containers[0]
@@ -219,21 +251,20 @@ class PortManager:
             if not container.state.running:
                 raise PreconditionError("Environment is not running", "Run offbox up before restoring ports.")
             return ipaddress.IPv4Address(container.network.networks["offbox"].ip)
-        except (ValidationError, ValueError, KeyError) as exc:
+        except (ValueError, KeyError) as exc:
             raise PreconditionError(
                 "Invalid managed container network", "Inspect the offbox network and container ownership before retrying."
             ) from exc
 
-    def _desired(self, work: Worktree, host: HostState, config: PortsConfig) -> list[int]:
-        ports = set(config.forward)
-        if config.auto and any(
-            (work.root / name).is_file() for name in ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
-        ):
-            result = self._remote(
-                host, ["docker", "exec", "-u", "dev", "-w", "/work", work.container, "docker", "compose", "ps", "--format", "json"]
-            )
-            ports.update(parse_compose(result.stdout))
-        return sorted(ports)
+    def _discovery(self, work: Worktree, host: HostState) -> tuple[IPv4Address, list[int]]:
+        result = self._remote(host, ["sh", "-s", "--", work.name, str(work.root), work.container], input=PORT_DISCOVERY_SCRIPT, timeout=30)
+        try:
+            snapshot = PortSnapshot.model_validate_json(result.stdout)
+        except ValidationError as exc:
+            raise PreconditionError(
+                "Invalid managed container network", "Inspect the offbox network and container ownership before retrying."
+            ) from exc
+        return self._container_ip(work, snapshot.containers), parse_compose(snapshot.compose)
 
     def _spec(self, env: EnvState, remote: int) -> ForwardSpec:
         if env.forward_ip is None:
@@ -332,11 +363,19 @@ class PortManager:
 
     def _restore(self, work: Worktree, host: HostState, config: PortsConfig) -> PortsReport:
         self._env(self.store.read(), work, host)
-        desired = self._desired(work, host, config)
+        ip = None
+        ports = set(config.forward)
+        if config.auto and any(
+            (work.root / name).is_file() for name in ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
+        ):
+            ip, discovered = self._discovery(work, host)
+            ports.update(discovered)
+        desired = sorted(ports)
         current = self._env(self.store.read(), work, host)
         if not desired and not current.local_ports:
             return self.report(current)
-        ip = self._ip(work, host)
+        if ip is None:
+            ip = self._ip(work, host)
         pid = self._master(host)
         if pid is None:
             raise ConnectionError_("SSH master is unavailable", "Run offbox ports again after checking SSH connectivity.")
@@ -353,6 +392,7 @@ class PortManager:
                 self._forward(work, host, remote, ip, pid)
         return self.report(self._env(self.store.read(), work, host))
 
+    @measured("Port forwarding")
     def restore(self, work: Worktree, host: HostState, config: PortsConfig) -> PortsReport:
         with self._operation():
             return self._restore(work, host, config)

@@ -9,6 +9,7 @@ from offbox.errors import CommandFailed, ProviderError
 from offbox.logging import redact
 from offbox.runner import Result, Runner
 from offbox.ssh import write_private
+from offbox.timings import stage
 
 
 class TofuDriver:
@@ -35,9 +36,11 @@ class TofuDriver:
     def create(self, variables: HostVariables) -> ProviderOutputs:
         write_private(self.workspace / "offbox.auto.tfvars.json", variables.model_dump_json(indent=2))
         console.step("Initialising provider")
-        self._run(["init", "-input=false"])
+        with stage("Provider initialization"):
+            self._run(["init", "-input=false"])
         console.step("Creating host")
-        self._run(["apply", "-auto-approve", "-input=false"])
+        with stage("VM provisioning"):
+            self._run(["apply", "-auto-approve", "-input=false"])
         output = self._run(["output", "-json"])
         try:
             values = TofuOutputs.model_validate_json(output.stdout)
@@ -49,4 +52,5 @@ class TofuDriver:
 
     def destroy(self) -> None:
         console.step("Destroying host")
-        self._run(["destroy", "-auto-approve", "-input=false"])
+        with stage("VM deletion"):
+            self._run(["destroy", "-auto-approve", "-input=false"])

@@ -97,6 +97,66 @@ def test_invalid_compose_output_is_not_silently_empty(data: str) -> None:
         parse_compose(data)
 
 
+@pytest.mark.parametrize("fixture", ["ports-array.json", "ports-ndjson.json"])
+def test_automatic_discovery_uses_one_fresh_owned_snapshot_and_restores_all_ports(tmp_path: Path, fixture: str) -> None:
+    paths, work, host = setup(tmp_path)
+    (work.root / "compose.yaml").write_text("services: {}\n")
+    compose = (Path(__file__).parents[1] / "fixtures/compose" / fixture).read_text()
+    response = json.dumps({"containers": json.loads(inspect_script(work, host).stdout), "compose": compose})
+    query = ssh_argv(host.name, ["sh", "-s", "--", work.name, str(work.root), work.container])
+    forwards = [spec(work, local=port, remote=port) for port in (3000, 8000, 9000)]
+    runner = FakeRunner(
+        [Script(prefix=query, stdout=response), master(), *[Script(prefix=forwarding_command("forward", item)) for item in forwards]]
+    )
+    report = PortManager(paths, runner, probe=lambda _: True).restore(work, host, PortsConfig(forward=[9000]))
+    assert [(item.remote, item.local, item.active) for item in report.forwards] == [
+        (3000, 3000, True),
+        (8000, 8000, True),
+        (9000, 9000, True),
+    ]
+    assert runner.calls[0].argv == query
+    assert len([call for call in runner.calls if "-O" not in call.argv]) == 1
+    assert runner.scripts == []
+
+
+@pytest.mark.parametrize("invalid", ["name", "labels", "stopped", "ip", "extra-container", "compose", "schema"])
+def test_invalid_combined_port_snapshot_never_changes_forward_ownership(tmp_path: Path, invalid: str) -> None:
+    paths, work, host = setup(tmp_path, mapping={8000: 8000}, active=True)
+    (work.root / "compose.yaml").write_text("services: {}\n")
+    containers = json.loads(inspect_script(work, host).stdout)
+    compose = "[]"
+    if invalid == "name":
+        containers[0]["Name"] = "/unowned"
+    elif invalid == "labels":
+        containers[0]["Config"]["Labels"] = {"offbox.env": "unowned"}
+    elif invalid == "stopped":
+        containers[0]["State"]["Running"] = False
+    elif invalid == "ip":
+        containers[0]["NetworkSettings"]["Networks"]["offbox"]["IPAddress"] = "bad-ip"
+    elif invalid == "extra-container":
+        containers.append(containers[0])
+    elif invalid == "compose":
+        compose = "bad-json"
+    response = "{}" if invalid == "schema" else json.dumps({"containers": containers, "compose": compose})
+    runner = FakeRunner([Script(prefix=["ssh"], stdout=response)])
+    before = StateStore(paths.state).read()
+    with pytest.raises(PreconditionError):
+        PortManager(paths, runner).restore(work, host, PortsConfig())
+    assert len(runner.calls) == 1
+    assert StateStore(paths.state).read() == before
+
+
+@pytest.mark.parametrize("status", [1, 255])
+def test_combined_discovery_failure_keeps_mappings_and_connection_error_contract(tmp_path: Path, status: int) -> None:
+    paths, work, host = setup(tmp_path, mapping={8000: 8000}, active=True)
+    (work.root / "compose.yaml").write_text("services: {}\n")
+    runner = FakeRunner([Script(prefix=["ssh"], returncode=status, stderr="probe failed")])
+    before = StateStore(paths.state).read()
+    with pytest.raises(ConnectionError_ if status == 255 else CommandFailed):
+        PortManager(paths, runner).restore(work, host, PortsConfig())
+    assert StateStore(paths.state).read() == before
+
+
 def test_allocation_prefers_remote_then_skips_reserved_and_busy() -> None:
     probes: list[int] = []
 

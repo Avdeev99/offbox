@@ -21,6 +21,8 @@ A remote command can itself exit with codes 1–4. When execution and status com
 
 `offbox --version` and `offbox version` print only the version to stdout. `-v` echoes subprocess commands to stderr with secrets redacted. Invocation details, durations, statuses and error tracebacks are written to the daily log under `$XDG_STATE_HOME/offbox/logs`, defaulting to `~/.local/state/offbox/logs`. Logs are retained for 14 days.
 
+The global `--timings` flag prints stage durations and total command-handling time to stderr, including measured stages that raise an error. For example, use `offbox --timings up`, `offbox --timings exec -- pytest`, or `offbox --timings status --json`. Repeated stages are accumulated with a call count. The total starts after argument parsing and excludes Python/import/CLI startup; uninstrumented work is included only in the total. Stdout, JSON and exit statuses retain their usual contracts. Eager help/version options can exit before timing collection begins.
+
 ## Runtime tools
 
 - OpenSSH 8.0 or newer and Git 2.30 or newer are required.

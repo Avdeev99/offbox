@@ -17,6 +17,7 @@ from offbox.errors import OffboxError
 from offbox.logging import configure, redact, register_exec_secrets
 from offbox.paths import Paths
 from offbox.runner import SubprocessRunner
+from offbox.timings import collect
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ class ErrorGroup(TyperGroup):
             raise Exit(1) from exc
 
     def invoke(self, ctx: Context) -> object:
+        with collect(ctx.params.get("timings") is True):
+            return self._invoke_with_errors(ctx)
+
+    def _invoke_with_errors(self, ctx: Context) -> object:
         log_path = Paths.discover().log_file()
         try:
             return super().invoke(ctx)
@@ -76,6 +81,7 @@ def main(
         bool, typer.Option("--version", callback=_version_callback, is_eager=True, help="Show the version and exit.")
     ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Echo commands with secrets redacted.")] = False,
+    timings: Annotated[bool, typer.Option("--timings", help="Show stage durations on stderr; excludes CLI startup.")] = False,
 ) -> None:
     ctx.obj = SubprocessRunner(verbose=verbose)
 

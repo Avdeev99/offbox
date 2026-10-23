@@ -56,6 +56,8 @@ Both worktrees can publish remote port 8000 and use the same Compose container n
 
 `up` creates or starts the environment, synchronizes files, installs declared dependencies, starts the declared stack and restores forwards. `exec` flushes sync, checks dependency hashes and streams the requested command with its actual exit code. Git metadata is excluded from sync; run Git locally.
 
+Use `offbox --timings up` or `offbox --timings exec -- COMMAND` to see stage durations on stderr. Timing totals exclude Python/CLI startup; command output and exit codes are preserved.
+
 ## Requirements and scope
 
 - macOS or Linux client, Python 3.12+, Git 2.30+, OpenSSH 8+ and Mutagen 0.18.x. Windows clients use WSL2.
@@ -94,5 +96,7 @@ uv build
 ```
 
 CI runs strict lint/type checks, a Linux/macOS × Python 3.12/3.13 unit matrix and native amd64 image builds. The focused Linux Docker smoke job exercises real SSH, Mutagen, execution and forwarding with disposable local containers. It uses no cloud credentials or billable cloud resources. Cloud API provisioning and VM bootstrap remain unverified by that job; browser, OOM and performance tests are outside its scope.
+
+A separately approved [real Hetzner benchmark](docs/benchmarks/2026-10-23-hetzner.md) exercised provisioning and both sample apps, including browser tests, then verified cloud cleanup. Its measurements and limits are recorded for comparison.
 
 Release workflows are prepared, but PyPI publishing and release tags are deferred. The public universal image follows the compatibility series defined by `DEFAULT_IMAGE` in [the package](src/offbox/__init__.py). See [CONTRIBUTING.md](CONTRIBUTING.md) for development, image and future publishing instructions. Licensed under [MIT](LICENSE).

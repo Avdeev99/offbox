@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from types import FrameType
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, ValidationError
 
 from offbox import console
 from offbox.config import InstallConfig, Model, ProjectConfig, load_config
@@ -25,10 +25,10 @@ from offbox.paths import Paths
 from offbox.runner import Runner, StreamProcess
 from offbox.ssh import ssh_argv
 from offbox.state import HostState
+from offbox.timings import measured, stage
 
 logger = logging.getLogger(__name__)
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_DIGEST = re.compile(r"[a-f0-9]{64}")
 _CONNECTION_FIX = "offbox status"
 
 
@@ -38,6 +38,11 @@ class ExecOptions(Model):
     no_sync: bool = False
     stdin: bool = False
     overrides: dict[str, SecretStr] = Field(default_factory=dict)
+
+
+class InstallProbe(Model):
+    digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    marker: str = Field(pattern=r"^(?:missing|[a-f0-9]{64})$")
 
 
 def parse_env(entries: Sequence[str]) -> dict[str, SecretStr]:
@@ -178,6 +183,14 @@ printf '%s\n' "$2" > "$tmp"
 mv -f -- "$tmp" "$path/install.sha256"
 """
 
+INSTALL_PROBE_SCRIPT = (
+    "set -eu\n"
+    "offbox_hash() (\n" + _HASH + "\n)\n"
+    "offbox_marker() (\n" + _MARKER_READ + "\n)\n"
+    "offbox_work=$1\noffbox_directory=$2\nshift 2\n"
+    'offbox_hash "$offbox_work" "$@"\noffbox_marker "$offbox_directory"\n'
+)
+
 
 def install_paths(names: Sequence[str]) -> list[str]:
     for name in names:
@@ -308,8 +321,8 @@ class Executor:
             raise ConnectionError_("SSH connection lost before command completion was confirmed", _CONNECTION_FIX)
         return status if status >= 0 else 128 - status
 
-    def _remote(self, host: HostState, argv: Sequence[str], *, input: str | None = None) -> str:
-        result = self.runner.run(ssh_argv(host.name, argv), check=False, timeout=30, input=input)
+    def _remote(self, host: HostState, argv: Sequence[str], *, input: str | None = None, timeout: float = 30) -> str:
+        result = self.runner.run(ssh_argv(host.name, argv), check=False, timeout=timeout, input=input)
         if result.returncode == 255:
             raise ConnectionError_("SSH connection lost during installation setup", _CONNECTION_FIX)
         if result.returncode:
@@ -349,6 +362,19 @@ class Executor:
             raise PreconditionError("Invalid remote install hash", "Check the host sha256sum command and retry.")
         return match[1]
 
+    def install_probe(self, work: Worktree, host: HostState, names: Sequence[str]) -> InstallProbe:
+        result = self._remote(
+            host, ["sh", "-s", "--", work.work, work.directory, *install_paths(names)], input=INSTALL_PROBE_SCRIPT, timeout=60
+        )
+        hash_line, separator, marker = result.partition("\n")
+        match = re.fullmatch(r"([a-f0-9]{64})  -", hash_line)
+        if not separator or match is None:
+            raise PreconditionError("Invalid remote install hash", "Check the host sha256sum command and retry.")
+        try:
+            return InstallProbe(digest=match[1], marker=marker)
+        except ValidationError as exc:
+            raise PreconditionError("Invalid installation marker", "Remove the host .offbox/install.sha256 marker and retry.") from exc
+
     def _stage(self, work: Worktree, host: HostState, command: str, *, env: Mapping[str, str] | None = None) -> None:
         status = self.run(work, host, ["sh", "-c", command], env=env, diagnostics=True)
         if status:
@@ -356,6 +382,7 @@ class Executor:
                 raise OffboxError("Setup command interrupted", "Retry offbox up or the requested command when ready.", status)
             raise CommandFailed(["sh", "-c", command], status, "Installation or stack startup failed; the environment is retained.")
 
+    @measured("Dependencies")
     def install(
         self, work: Worktree, host: HostState, config: InstallConfig, *, always: bool = False, env: Mapping[str, str] | None = None
     ) -> None:
@@ -363,11 +390,8 @@ class Executor:
             return
         install_paths(config.when)
         with self.installation_lock(work):
-            digest = self.install_hash(work, host, config.when)
-            marker = self._remote(host, ["sh", "-s", "--", work.directory], input=_MARKER_READ)
-            if marker != "missing" and _DIGEST.fullmatch(marker) is None:
-                raise PreconditionError("Invalid installation marker", "Remove the host .offbox/install.sha256 marker and retry.")
-            if not always and marker == digest:
+            probe = self.install_probe(work, host, config.when)
+            if not always and probe.marker == probe.digest:
                 return
             console.step("Installing dependencies" if always else "lockfile changed, running install")
             self._stage(work, host, config.command, env=env)
@@ -378,12 +402,14 @@ class Executor:
         env = execution_env(project.exec.env, {}, tty=False)
         if any((work.root / name).is_file() for name in (".tool-versions", "mise.toml")):
             console.step("Installing project tools with mise")
-            self._stage(work, host, "mise install", env={**env, "MISE_YES": "1"})
+            with stage("Project tools"):
+                self._stage(work, host, "mise install", env={**env, "MISE_YES": "1"})
         self.install(work, host, project.install, always=True, env=env)
         stack, _ = project.stack.commands(work.root)
         if stack and not no_stack:
             console.step("Starting project stack")
-            self._stage(work, host, stack, env=env)
+            with stage("Stack startup"):
+                self._stage(work, host, stack, env=env)
 
     def execute(self, options: ExecOptions, *, cwd: Path | None = None) -> int:
         from offbox.runtime import Runtime
@@ -416,13 +442,14 @@ class Executor:
         self.install(work, host, project.install, env=env)
         with host_operation(self.paths, host.name):
             runtime.ports.restore(work, host, project.ports)
-        return self.run(
-            work,
-            host,
-            options.command,
-            directory=directory,
-            env=env,
-            tty=tty,
-            force_pty=options.tty is True and not (sys.stdin.isatty() and sys.stdout.isatty()),
-            stdin=options.stdin,
-        )
+        with stage("Command execution"):
+            return self.run(
+                work,
+                host,
+                options.command,
+                directory=directory,
+                env=env,
+                tty=tty,
+                force_pty=options.tty is True and not (sys.stdin.isatty() and sys.stdout.isatty()),
+                stdin=options.stdin,
+            )

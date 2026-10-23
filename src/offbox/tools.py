@@ -14,6 +14,7 @@ from pathlib import Path
 from offbox.config import Model
 from offbox.errors import PreconditionError
 from offbox.runner import Runner
+from offbox.timings import measured
 
 TOFU_VERSION = "1.10.6"
 MUTAGEN_MIN = (0, 18)
@@ -101,6 +102,7 @@ class ToolDiscovery:
         self.cache = cache
         self.lookup = lookup
 
+    @measured("Local tool checks")
     def check(self, name: str) -> Tool:
         executable = self.lookup(name)
         fix = {
