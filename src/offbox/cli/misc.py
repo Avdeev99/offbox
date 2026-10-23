@@ -66,7 +66,7 @@ def logs(
 
 def setup(
     ctx: typer.Context,
-    provider: Annotated[Literal["hetzner", "ssh"] | None, typer.Option("--provider")] = None,
+    provider: Annotated[Literal["hetzner", "gcp", "ssh"] | None, typer.Option("--provider")] = None,
     action: Annotated[Literal["check", "create", "init"] | None, typer.Option("--action")] = None,
     name: Annotated[str, typer.Option("--name")] = "main",
     ssh_key: Annotated[Path | None, typer.Option("--ssh-key")] = None,

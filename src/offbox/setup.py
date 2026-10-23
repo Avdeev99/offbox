@@ -17,7 +17,7 @@ from offbox.state import StateStore
 
 
 class SetupOptions(Model):
-    provider: Literal["hetzner", "ssh"] | None = None
+    provider: Literal["hetzner", "gcp", "ssh"] | None = None
     action: Literal["check", "create", "init"] | None = None
     name: str = "main"
     ssh_key: Path | None = None
@@ -44,19 +44,19 @@ def setup(
     if provider is None:
         if ask is None:
             raise PreconditionError(
-                "Setup needs a provider", "Run offbox setup --provider ssh --action check, or --provider hetzner --action create."
+                "Setup needs a provider", "Pass --provider hetzner, --provider gcp or --provider ssh with an explicit --action."
             )
-        choice = ask("Provider (hetzner or ssh)", "hetzner")
-        if choice not in ("hetzner", "ssh"):
-            raise PreconditionError("Unknown setup provider", "Pass --provider hetzner or --provider ssh.")
-        provider = "hetzner" if choice == "hetzner" else "ssh"
+        choice = ask("Provider (hetzner, gcp or ssh)", "hetzner")
+        if choice not in ("hetzner", "gcp", "ssh"):
+            raise PreconditionError("Unknown setup provider", "Pass --provider hetzner, --provider gcp or --provider ssh.")
+        provider = "hetzner" if choice == "hetzner" else "gcp" if choice == "gcp" else "ssh"
     action = options.action
     if action is None:
         if confirm is None:
             raise PreconditionError("Setup needs an explicit action", "Pass --action check, --action create or --action init.")
         action = (
-            ("create" if provider == "hetzner" else "init")
-            if confirm("Create a billable cloud host?" if provider == "hetzner" else "Bootstrap an existing SSH host?")
+            ("create" if provider != "ssh" else "init")
+            if confirm("Create a billable cloud host?" if provider != "ssh" else "Bootstrap an existing SSH host?")
             else "check"
         )
     if action == "check" and any(check.name == "host" and not check.ok for check in report.checks):
@@ -78,7 +78,7 @@ def setup(
     fatal: list[Check] = []
     for check in report.checks:
         required = not (check.name == "host" and action != "check") and not (
-            check.name == "tofu" and not (provider == "hetzner" and action == "create")
+            check.name == "tofu" and not (provider != "ssh" and action == "create")
         )
         if check.ok:
             console.success(check.message)
@@ -92,7 +92,7 @@ def setup(
     manifest = discover_provider(provider, paths)
     credentials_env(manifest.manifest, paths)
     if action == "create":
-        if provider != "hetzner":
+        if provider == "ssh":
             raise PreconditionError(
                 "The SSH provider cannot create a cloud host", "Use --provider ssh --action init --target USER@ADDRESS."
             )

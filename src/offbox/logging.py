@@ -12,7 +12,7 @@ from offbox.config import Model
 from offbox.paths import Paths
 
 _registered_secrets: set[str] = set()
-_SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY)$", re.IGNORECASE)
+_SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY|CREDENTIALS|KEYFILE_JSON)$", re.IGNORECASE)
 _invocation: ContextVar[str] = ContextVar("offbox_invocation", default="")
 _environment: ContextVar[str | None] = ContextVar("offbox_environment", default=None)
 

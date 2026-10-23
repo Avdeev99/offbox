@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -53,15 +54,19 @@ def test_tty_provider_choice_and_declined_creation_are_safe(tmp_path: Path, monk
 
     runner = FakeRunner()
     setup(paths, runner, SetupOptions(), ask=ask, confirm=confirm, ssh_config=config)
-    assert prompts == ["Provider (hetzner or ssh)", "Bootstrap an existing SSH host?"]
+    assert prompts == ["Provider (hetzner, gcp or ssh)", "Bootstrap an existing SSH host?"]
     assert runner.calls == []
 
 
-def test_explicit_create_passes_flags_and_ignores_unrelated_offline_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("provider", ["hetzner", "gcp"])
+def test_explicit_create_passes_flags_and_ignores_unrelated_offline_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: Literal["hetzner", "gcp"]
+) -> None:
     paths, config, seen = context(
         tmp_path, monkeypatch, [Check(name="host", ok=False, message="Old default offline", fix="Check its network.")]
     )
     monkeypatch.setenv("HCLOUD_TOKEN", "synthetic-setup-token")
+    monkeypatch.setenv("GOOGLE_PROJECT", "synthetic-project")
     created: list[CreateOptions] = []
 
     def create(_paths: Paths, _runner: Runner, options: CreateOptions, *, ssh_config: Path | None = None) -> HostState:
@@ -69,7 +74,7 @@ def test_explicit_create_passes_flags_and_ignores_unrelated_offline_default(tmp_
         created.append(options)
         return HostState(
             name=options.name,
-            provider="hetzner",
+            provider=provider,
             address="192.0.2.1",
             ssh_user="offbox",
             created_at=datetime.now(UTC),
@@ -81,11 +86,35 @@ def test_explicit_create_passes_flags_and_ignores_unrelated_offline_default(tmp_
     setup(
         paths,
         FakeRunner(),
-        SetupOptions(provider="hetzner", action="create", name="new", size="ccx33", region="fsn1", ssh_key=key),
+        SetupOptions(provider=provider, action="create", name="new", size="custom-size", region="custom-region", ssh_key=key),
         ssh_config=config,
     )
-    assert created == [CreateOptions(provider="hetzner", name="new", size="ccx33", region="fsn1", ssh_key=key)]
+    assert created == [CreateOptions(provider=provider, name="new", size="custom-size", region="custom-region", ssh_key=key)]
     assert seen == [key]
+
+
+def test_gcp_declined_creation_only_checks_prerequisites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths, config, _ = context(tmp_path, monkeypatch)
+    monkeypatch.setenv("GOOGLE_PROJECT", "synthetic-project")
+    runner = FakeRunner()
+    prompts: list[str] = []
+
+    def confirm(message: str) -> bool:
+        prompts.append(message)
+        return False
+
+    setup(paths, runner, SetupOptions(), ask=lambda _m, _d: "gcp", confirm=confirm, ssh_config=config)
+    assert prompts == ["Create a billable cloud host?"]
+    assert runner.calls == []
+
+
+def test_gcp_create_requires_provider_tool_before_provisioning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths, config, _ = context(tmp_path, monkeypatch, [Check(name="tofu", ok=False, message="Tool missing", fix="Install OpenTofu.")])
+    runner = FakeRunner()
+    with pytest.raises(PreconditionError, match="prerequisites") as caught:
+        setup(paths, runner, SetupOptions(provider="gcp", action="create"), ssh_config=config)
+    assert caught.value.fix == "Install OpenTofu."
+    assert runner.calls == []
 
 
 def test_setup_repairs_include_and_rechecks_default_host_before_failing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
