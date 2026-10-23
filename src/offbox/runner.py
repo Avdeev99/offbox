@@ -10,7 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from offbox import console
 from offbox.errors import CommandFailed, OffboxError, PreconditionError
@@ -27,6 +27,57 @@ class Result(BaseModel):
     stderr: str = ""
 
 
+class StreamProcess(Protocol):
+    def poll(self) -> int | None: ...
+    def wait(self, timeout: float | None = None) -> int | None:
+        """Return None if a bounded wait expires while the process is still running."""
+        ...
+
+    def kill(self) -> None: ...
+
+
+class _SubprocessStream:
+    def __init__(self, process: subprocess.Popen[bytes], *, grouped: bool, started: float) -> None:
+        self.process = process
+        self.grouped = grouped
+        self.started = started
+        self.finished = False
+
+    def _finish(self, code: int | None) -> int | None:
+        if code is not None and not self.finished:
+            logger.debug("stream exit=%s duration=%.3f", code, time.monotonic() - self.started)
+            self.finished = True
+        return code
+
+    def poll(self) -> int | None:
+        try:
+            return self._finish(self.process.poll())
+        except OSError as exc:
+            raise PreconditionError("Cannot inspect streaming command", "Check the local process and retry.") from exc
+
+    def wait(self, timeout: float | None = None) -> int | None:
+        try:
+            return self._finish(self.process.wait(timeout=timeout))
+        except subprocess.TimeoutExpired:
+            return None
+        except OSError as exc:
+            raise PreconditionError("Cannot wait for streaming command", "Check the local process and retry.") from exc
+
+    def kill(self) -> None:
+        if self.poll() is not None:
+            return
+        try:
+            with suppress(ProcessLookupError):
+                if self.grouped:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                else:
+                    self.process.kill()
+        except OSError as exc:
+            raise PreconditionError("Cannot stop streaming command", "Stop the local SSH process and inspect the remote command.") from exc
+        if self.wait(timeout=1.0) is None:
+            raise PreconditionError("Cannot reap streaming command within 1s", "Inspect and stop the local SSH process manually.")
+
+
 class Runner(Protocol):
     def run(
         self,
@@ -41,6 +92,10 @@ class Runner(Protocol):
     ) -> Result: ...
 
     def stream(self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False) -> int: ...
+
+    def start_stream(
+        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+    ) -> StreamProcess: ...
 
 
 class SubprocessRunner:
@@ -182,10 +237,23 @@ class SubprocessRunner:
         logger.debug("stream exit=%s duration=%.3f", result.returncode, time.monotonic() - start)
         return result.returncode
 
+    def start_stream(
+        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+    ) -> StreamProcess:
+        started, values = self._start(argv, env)
+        try:
+            process = subprocess.Popen(
+                list(argv), env=values, stdin=None if stdin or tty else subprocess.DEVNULL, start_new_session=not tty
+            )
+        except OSError as exc:
+            logger.error("stream launch failed duration=%.3f", time.monotonic() - started)
+            raise PreconditionError(f"Cannot run {argv[0]}", f"Install {argv[0]} and check its permissions.") from exc
+        return _SubprocessStream(process, grouped=not tty, started=started)
+
 
 class Call(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    method: Literal["run", "stream"]
+    method: Literal["run", "stream", "start_stream"]
     argv: list[str]
     check: bool = True
     capture: bool = True
@@ -202,21 +270,59 @@ class Script(BaseModel):
     returncode: int = 0
     stdout: str = ""
     stderr: str = ""
-    method: Literal["run", "stream"] = "run"
+    method: Literal["run", "stream", "start_stream"] = "run"
+    stream_results: list[int | None] = Field(default_factory=list[int | None])
+
+
+class FakeStreamProcess:
+    def __init__(self, returncode: int, results: Sequence[int | None] = ()) -> None:
+        self.results = list(results) if results else [returncode]
+        self.returncode: int | None = None
+        self.waits: list[float | None] = []
+        self.killed = False
+
+    def poll(self) -> int | None:
+        if self.returncode is None:
+            code = self.results.pop(0) if self.results else None
+            if code is not None:
+                self.returncode = code
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int | None:
+        self.waits.append(timeout)
+        result = self.poll()
+        while result is None and timeout is None:
+            if not self.results:
+                raise PreconditionError(
+                    "Fake stream has no scripted completion", "Use a bounded wait, kill it, or script a completion status."
+                )
+            result = self.poll()
+        return result
+
+    def kill(self) -> None:
+        if self.poll() is None:
+            self.killed = True
+            self.returncode = -signal.SIGKILL
+            self.results.clear()
 
 
 class FakeRunner:
     def __init__(self, scripts: Sequence[Script] = ()) -> None:
         self.scripts = list(scripts)
         self.calls: list[Call] = []
+        self.processes: list[FakeStreamProcess] = []
 
-    def _match(self, call: Call) -> Result:
+    def _script(self, call: Call) -> Script:
         self.calls.append(call)
         for index, script in enumerate(self.scripts):
             if call.method == script.method and call.argv[: len(script.prefix)] == script.prefix:
                 self.scripts.pop(index)
-                return Result(argv=call.argv, returncode=script.returncode, stdout=script.stdout, stderr=script.stderr)
+                return script
         raise PreconditionError(f"Unexpected {call.method} call: {call.argv}", "Script this command in FakeRunner.")
+
+    def _match(self, call: Call) -> Result:
+        script = self._script(call)
+        return Result(argv=call.argv, returncode=script.returncode, stdout=script.stdout, stderr=script.stderr)
 
     def run(
         self,
@@ -248,3 +354,12 @@ class FakeRunner:
         return self._match(
             Call(method="stream", argv=list(argv), env=dict(env) if env is not None else None, stdin=stdin, tty=tty)
         ).returncode
+
+    def start_stream(
+        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+    ) -> StreamProcess:
+        call = Call(method="start_stream", argv=list(argv), capture=False, env=dict(env) if env is not None else None, stdin=stdin, tty=tty)
+        script = self._script(call)
+        process = FakeStreamProcess(script.returncode, script.stream_results)
+        self.processes.append(process)
+        return process

@@ -18,6 +18,30 @@ def register_secrets(env: Mapping[str, str]) -> None:
     _registered_secrets.update(part for value in values for part in value.splitlines() if part)
 
 
+def register_exec_secrets(argv: Sequence[str]) -> None:
+    command = next((index for index, value in enumerate(argv) if not value.startswith("-")), None)
+    if command is None or argv[command] != "exec":
+        return
+    index = command + 1
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--":
+            return
+        entry: str | None = None
+        if argument == "--env":
+            index += 1
+            if index >= len(argv) or argv[index] == "--":
+                return
+            entry = argv[index]
+        elif argument.startswith("--env="):
+            entry = argument[len("--env=") :]
+        if entry is not None:
+            name, separator, value = entry.partition("=")
+            if separator:
+                register_secrets({name: value})
+        index += 1
+
+
 def redact(value: str, env: Mapping[str, str] | None = None) -> str:
     values = os.environ if env is None else env
     secrets = sorted(
