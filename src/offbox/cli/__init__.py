@@ -8,10 +8,11 @@ from typer.exceptions import Abort, Exit
 
 from offbox import __version__, console
 from offbox.cli.env import register as register_env_commands
+from offbox.cli.exec import register as register_exec_command
 from offbox.cli.host import app as host_app
 from offbox.doctor import diagnose
 from offbox.errors import OffboxError
-from offbox.logging import configure, redact
+from offbox.logging import configure, redact, register_exec_secrets
 from offbox.paths import Paths
 from offbox.runner import SubprocessRunner
 
@@ -23,6 +24,7 @@ class ErrorGroup(TyperGroup):
         paths = Paths.discover()
         log_path = paths.log_file()
         try:
+            register_exec_secrets(args)
             configure(paths, [info_name or "offbox", *args])
             return super().make_context(info_name, args, parent, **extra)
         except ClickException as exc:
@@ -54,6 +56,7 @@ class ErrorGroup(TyperGroup):
 app = typer.Typer(no_args_is_help=True, add_completion=False, cls=ErrorGroup)
 app.add_typer(host_app, name="host")
 register_env_commands(app)
+register_exec_command(app)
 
 
 def _version_callback(value: bool) -> None:

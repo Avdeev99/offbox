@@ -317,7 +317,7 @@ class Runtime:
         work = find_worktree(self.runner, cwd)
         env = self._recorded(work)
         if env is None:
-            raise PreconditionError("Environment is not registered", "Run offbox up in this worktree.")
+            raise PreconditionError("Environment is not registered", "offbox up")
         return work, env, self._host(env.host)
 
     def mutate(
@@ -336,9 +336,13 @@ class Runtime:
             timeout=600,
         )
 
-    def up(self, *, cwd: Path | None = None, host_name: str | None = None, fresh: bool = False) -> EnvState:
+    def up(self, *, cwd: Path | None = None, host_name: str | None = None, fresh: bool = False, no_stack: bool = False) -> EnvState:
+        from offbox.execute import Executor, execution_env, install_paths
+
         work = find_worktree(self.runner, cwd)
         project = load_config(work.root / "offbox.toml", ProjectConfig)
+        install_paths(project.install.when)
+        execution_env(project.exec.env, {}, tty=False)
         config = project.env
         dockerfile = self.dockerfile_path(work, config.dockerfile) if config.dockerfile is not None else None
         previous = self._recorded(work)
@@ -378,6 +382,7 @@ class Runtime:
             if fresh:
                 self.sync.ensure(work, host, project.sync)
             self.sync.flush(work, host)
+            Executor(self.paths, self.runner, clock=self.clock).up_stages(work, host, project, no_stack=no_stack)
             if built is not None and built.digest != container.image:
                 console.warn("Custom image changed; run offbox up --fresh to use it. Existing Docker data is retained.")
             env.image_digest = container.image
