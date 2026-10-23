@@ -1,0 +1,5 @@
+[
+  {"Name":"project-api-1","Service":"api","Publishers":[{"URL":"0.0.0.0","TargetPort":80,"PublishedPort":8000,"Protocol":"tcp"},{"URL":"::","TargetPort":80,"PublishedPort":8000,"Protocol":"tcp"},{"URL":"0.0.0.0","TargetPort":53,"PublishedPort":8053,"Protocol":"udp"},{"URL":"","TargetPort":9000,"PublishedPort":0,"Protocol":"tcp"}]},
+  {"Name":"project-db-1","Service":"db","Publishers":null},
+  {"Name":"project-web-1","Service":"web","Publishers":[{"URL":"127.0.0.1","TargetPort":3000,"PublishedPort":3000,"Protocol":"tcp"}]}
+]

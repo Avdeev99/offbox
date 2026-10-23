@@ -4,6 +4,7 @@ import tempfile
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime
+from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Literal
 
@@ -14,6 +15,7 @@ from offbox.errors import PreconditionError
 
 
 class HostState(Model):
+    control_master_pid: int | None = Field(default=None, gt=0)
     phase: Literal["creating", "initializing", "ready"] = "ready"
     name: str
     provider: str
@@ -28,6 +30,7 @@ class HostState(Model):
 
 
 class EnvState(Model):
+    forward_ip: IPv4Address | None = None
     name: str
     host: str
     worktree_path: Path
