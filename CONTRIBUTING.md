@@ -21,6 +21,8 @@ make test
 
 Unit CI covers Ubuntu and macOS with Python 3.12 and 3.13. Validation uses unit tests, lint, strict type checks and distribution builds. Do not add paid cloud or end-to-end tests or require real credentials for tests.
 
+Runtime tool checks target OpenSSH >=8.0, Git >=2.30 and Mutagen 0.18.x. Provisioning uses OpenTofu >=1.8 or Terraform >=1.6, with a checksum-verified OpenTofu 1.10.6 fallback for macOS/Linux on amd64/arm64. Unit tests inject tool results and downloads; they do not require these tools or network access. See [the agent guide](docs/agents.md) for diagnostics and exit codes.
+
 Local pre-commit hooks use the locked Ruff installation:
 
 ```sh
