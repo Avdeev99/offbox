@@ -1,0 +1,15 @@
+#cloud-config
+ssh_deletekeys: true
+ssh_genkeytypes: []
+ssh_keys:
+  ed25519_private: "PRIVATE\nKEY\n"
+  ed25519_public: "ssh-ed25519 BBBB host"
+disable_root: true
+ssh_pwauth: false
+write_files:
+  - path: /usr/local/sbin/offbox-host-init
+    owner: root:root
+    permissions: "0700"
+    content: "#!/bin/sh\nset -eu\n"
+runcmd:
+  - ["env", "OFFBOX_HARDEN=1", "OFFBOX_VERSION=0.0.1", "/usr/local/sbin/offbox-host-init", "ghcr.io/avdeev99/offbox-universal:1", "ssh-ed25519 AAAA user"]
