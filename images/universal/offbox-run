@@ -28,7 +28,9 @@ if [ "${1:-}" = --signal ]; then
     validate_id "$run_id"
     [ ! -f "$state_dir/$run_id.code" ] || exit 0
     [ ! -f "$state_dir/$run_id.tty" ] || fail 'External group signaling is unavailable for TTY runs.' 'Use terminal controls for a TTY command.'
-    [ -f "$state_dir/$run_id.pid" ] && [ -f "$state_dir/$run_id.start" ] || fail 'Run metadata is unavailable.' 'Check the run status before retrying.'
+    if [ ! -f "$state_dir/$run_id.pid" ] || [ ! -f "$state_dir/$run_id.start" ]; then
+        fail 'Run metadata is unavailable.' 'Check the run status before retrying.'
+    fi
     pid=$(cat "$state_dir/$run_id.pid")
     started=$(cat "$state_dir/$run_id.start")
     case "$pid:$started" in *[!0-9:]*|:*|*:) fail 'Invalid process metadata.' 'Check the run status before retrying.' ;; esac
@@ -52,7 +54,9 @@ shift 2
 shift
 validate_id "$run_id"
 case "$directory" in /*) ;; *) fail 'Work directory must be absolute.' 'Use the mapped /work directory.' ;; esac
-[ ! -e "$state_dir/$run_id.pid" ] && [ ! -e "$state_dir/$run_id.code" ] || fail 'Run ID already exists.' 'Use a new run ID.'
+if [ -e "$state_dir/$run_id.pid" ] || [ -e "$state_dir/$run_id.code" ]; then
+    fail 'Run ID already exists.' 'Use a new run ID.'
+fi
 find "$state_dir" -maxdepth 1 -type f -mmin +1440 -print | while IFS= read -r expired; do
     expired_name=${expired##*/}
     case "$expired_name" in
