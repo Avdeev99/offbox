@@ -136,7 +136,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 sudo mkdir -p /srv/offbox/envs
 printf '%s\n' "$fixture_id" | sudo tee /srv/offbox/envs/.offbox-smoke-owner >/dev/null
-sudo chown 1000:1000 /srv/offbox/envs "$task_dir/artifacts"
+sudo chown 1000:1000 /srv/offbox/envs
+sudo chown "1000:$(id -g)" "$task_dir/artifacts"
+sudo chmod 0770 "$task_dir/artifacts"
 ssh-keygen -q -t ed25519 -N '' -f "$task_dir/keys/client"
 ssh-keygen -q -t ed25519 -N '' -f "$task_dir/keys/host"
 sudo chown -R 1000:1000 "$task_dir/keys"
