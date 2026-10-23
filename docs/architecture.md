@@ -15,7 +15,7 @@ flowchart LR
 
 ## Hosts and providers
 
-A host is an Ubuntu 24.04 amd64 machine reachable with key-only SSH. The `hetzner` provider creates a VM using OpenTofu or Terraform, renders cloud-init and waits for the ready marker. The `ssh` provider initializes an existing server with passwordless sudo. Initialization installs Docker, creates the `offbox` account when UID 1000 is available, prepares `/srv/offbox`, and pulls the default environment image. Existing accounts and SSH/firewall policy are preserved during existing-host initialization.
+A host is an Ubuntu 24.04 amd64 machine reachable with key-only SSH. The `hetzner` and `gcp` providers create a VM using OpenTofu or Terraform, render cloud-init and wait for the ready marker. The `ssh` provider initializes an existing server with passwordless sudo. Initialization installs Docker, creates the `offbox` account when UID 1000 is available, prepares `/srv/offbox`, and pulls the default environment image. Existing accounts and SSH/firewall policy are preserved during existing-host initialization.
 
 Provider definitions are folders with a typed manifest and, for the `tofu` driver, Terraform files. Creation saves a copy of that folder, its hash, provider variables and provisional host state before applying. Destruction uses the saved workspace. A failed operation retains enough local information to retry cleanup. See [the provider contract](writing-a-provider.md).
 

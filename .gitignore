@@ -221,3 +221,10 @@ __marimo__/
 
 # Local agent task snapshots and results
 .agent/
+
+# Generated provider workspaces can contain private cloud-init data.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+offbox.auto.tfvars.json

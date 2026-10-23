@@ -1,6 +1,6 @@
 # Limits and operating model
 
-Offbox v0.1 supports one source laptop/user, macOS or Linux clients, Ubuntu 24.04 amd64 hosts, and the Hetzner/OpenTofu and existing-SSH providers. Windows clients use WSL2. The universal image is amd64; an ARM laptop can be a client, but an arm64 host image is not provided.
+Offbox supports one source laptop/user, macOS or Linux clients, Ubuntu 24.04 amd64 hosts, and the Hetzner, Google Cloud and existing-SSH providers. Windows clients use WSL2. The universal image is amd64; an ARM laptop can be a client, but an arm64 host image is not provided.
 
 ## Git and project tooling
 
@@ -32,4 +32,4 @@ Install coordination is per environment on one client. Shared remote worktrees m
 
 ## Validation boundaries
 
-Unit tests cover exact orchestration, error handling, state and typed external-data contracts. The focused native Linux Docker smoke job covers real SSH/sync/exec/signals/forwarding and two isolated Compose stacks using disposable containers. It does not verify cloud API credentials/IAM, VM provisioning or bootstrap, real-host kernel differences, browser behavior, OOM behavior, or performance comparisons. CI creates no real-cloud resources. A separately approved [manual Hetzner run](benchmarks/2026-10-23-hetzner.md) verified provisioning and both sample apps, including browser tests; its small performance sample is not a general capacity or latency guarantee.
+Unit tests cover exact orchestration, error handling, state and typed external-data contracts. Provider validation and mocked Terraform contracts check schemas and planned GCP resources without cloud credentials. The focused native Linux Docker smoke job covers real SSH/sync/exec/signals/forwarding and two isolated Compose stacks using disposable containers. It does not verify cloud API credentials/IAM, VM provisioning or bootstrap, real-host kernel differences, browser behavior, OOM behavior, or performance comparisons. CI creates no real-cloud resources. Separately approved manual [Hetzner](benchmarks/2026-10-23-hetzner.md) and [Google Cloud](benchmarks/2026-10-23-gcp.md) runs verified provisioning and both sample apps, including browser tests; their small performance samples are not general capacity or latency guarantees.

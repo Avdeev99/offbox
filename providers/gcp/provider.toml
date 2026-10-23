@@ -1,0 +1,9 @@
+name = "gcp"
+description = "Google Compute Engine Ubuntu host"
+driver = "tofu"
+credentials_env = ["GOOGLE_PROJECT"]
+
+[defaults]
+size = "e2-standard-4"
+region = "us-east4-c"
+image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"

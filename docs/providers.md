@@ -1,6 +1,6 @@
 # Host providers
 
-Offbox includes `hetzner` for a new Ubuntu 24.04 VM and `ssh` for an existing Ubuntu 24.04 server. Host creation stores its registry and current default in the local state directory. User configuration remains read-only and supplies named presets.
+Offbox includes `hetzner` and `gcp` for a new Ubuntu 24.04 VM, and `ssh` for an existing Ubuntu 24.04 server. Host creation stores its registry and current default in the local state directory. User configuration remains read-only and supplies named presets.
 
 ## Hetzner Cloud
 
@@ -17,6 +17,28 @@ These commands create and delete a billable server. A stopped Hetzner server is 
 The built-in provider pins the `hetznercloud/hcloud` provider to `>=1.68,<1.69`. It creates a labelled server and firewall, permits inbound SSH and ICMP, and injects the user's public key through cloud-init. It creates no account-level SSH-key resource, so the same public key can bootstrap several hosts. Cloud bootstrap disables root/password SSH access, enables UFW, fail2ban and security upgrades, and installs Docker Engine major 29 from Docker's official apt repository.
 
 The bootstrap requires `IMAGE PUBLIC_KEY` arguments and `OFFBOX_VERSION` in its environment. `OFFBOX_HARDEN=1` selects cloud hardening. Bootstrap pulls the package's `DEFAULT_IMAGE`. A project's `env.image` or `env.dockerfile` is applied later by `offbox up`; the host preset's `image` selects the cloud operating system.
+
+## Google Cloud
+
+Enable the Compute Engine API and billing in your own project. Set the project explicitly and configure [Application Default Credentials](https://docs.cloud.google.com/docs/terraform/authentication), for example:
+
+```sh
+export GOOGLE_PROJECT="your-project-id"
+gcloud auth application-default login
+offbox host create gcp-main --provider gcp --size e2-standard-4 --region us-east4-c
+offbox host ssh gcp-main -- docker info
+offbox host destroy gcp-main --yes
+```
+
+For GCP, `--region` takes a **zone**, such as `us-east4-c`; the provider derives the subnet region. The defaults are `e2-standard-4`, `us-east4-c`, Ubuntu 24.04 amd64 and a 50 GB balanced persistent boot disk. These are billable resources; review [Compute pricing](https://cloud.google.com/products/compute/pricing), [disk pricing](https://cloud.google.com/compute/disks-image-pricing) and [network/IP pricing](https://cloud.google.com/vpc/network-pricing). The boot disk is deleted with the VM. The ephemeral external address is released with the instance.
+
+The provisioning identity needs Compute Instance Admin (v1), Compute Network Admin and Compute Security Admin, or equivalent narrower custom permissions. Credentials stay on the client. Google's provider supports ADC, service-account impersonation, `GOOGLE_APPLICATION_CREDENTIALS`, and `GOOGLE_OAUTH_ACCESS_TOKEN`; it reads them through its normal credential chain. An access token is short-lived and must still be valid for destruction; refresh it before retrying cleanup. A normal `gcloud auth login` alone does not configure ADC. Prefer ADC or impersonation for repeat use; a private service-account key is not required.
+
+The pinned `hashicorp/google` minor series is `>=8.7,<8.8`. Each host owns a separate VPC, one regional subnet and a targeted firewall allowing SSH and ICMP. It uses instance `user-data` for the common cloud-init bootstrap, disables OS Login for that instance and blocks project-wide SSH keys. It neither changes project-wide SSH settings nor attaches a service account to the VM. Development workloads therefore do not inherit a Google cloud identity. Organizations that enforce OS Login need a compatible custom provider; Offbox does not change organization policies.
+
+Provider project/authentication values are environment/ADC settings, not Terraform input variables or `offbox.toml` secrets. Saved cloud-init and Terraform state still contain the generated SSH host private key; preserve the local state permissions described in [security](security.md). The copied provider workspace is retained after failed creation/destruction, just as for Hetzner.
+
+`offbox setup --provider gcp --action create` supports the same size, zone, name and SSH-key flags. Noninteractive setup requires an explicit action and never silently creates a host. CI validates the provider schema and runs mocked Terraform contracts without cloud credentials or real resources.
 
 ## Existing SSH server
 

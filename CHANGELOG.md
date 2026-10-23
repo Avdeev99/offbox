@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Google Cloud provisioning with a dedicated per-host network, Ubuntu cloud-init, no attached VM service account, standard Google authentication and mocked Terraform contract tests.
+- A Google Cloud benchmark of both sample apps and a same-VM comparison measuring a 12.2% median command latency reduction from batching checks, with verified cloud cleanup.
 - Opt-in `--timings` summaries for provisioning, synchronization, setup, forwarding and command execution, without changing stdout or exit codes.
 - A real Hetzner benchmark of both sample applications, including timings, resource observations, billing estimates and verified cleanup.
 

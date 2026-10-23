@@ -292,10 +292,11 @@ Do not terminate an unrelated local service just because it holds a preferred po
 - `Fix: Pass a Compose service name after --stack.`
 - `Fix: Run offbox up before reading stack logs.`
 - `Fix: Pass --action check, --action create or --action init.`
-- `Fix: Pass --provider hetzner or --provider ssh.`
+- `Fix: Pass --provider hetzner, --provider gcp or --provider ssh.`
 - `Fix: Pass --provider ssh --action init --target USER@ADDRESS --accept-host-key.`
 - `Fix: Run offbox doctor and follow its Fix lines.`
-- `Fix: Run offbox setup --provider ssh --action check, or --provider hetzner --action create.`
+- `Fix: Pass --provider hetzner, --provider gcp or --provider ssh with an explicit --action.`
+- `Fix: Set GOOGLE_PROJECT before retrying.`
 - `Fix: Use --provider ssh --action init --target USER@ADDRESS.`
 - `Fix: Use --provider ssh --action init.`
 - `Fix: Check directory permissions and rerun offbox uninstall --yes.`

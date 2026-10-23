@@ -1,0 +1,1732 @@
+{
+  "date": "2026-10-23",
+  "provider": "gcp",
+  "zone": "us-east4-c",
+  "machine": "e2-standard-4",
+  "vcpus": 4,
+  "memory_gib": 16,
+  "boot_disk_gb": 50,
+  "boot_disk_type": "pd-balanced",
+  "cpu_platform": "AMD Rome",
+  "client": "macOS 15.7.3 arm64 / Python 3.12.7",
+  "terraform": "1.12.1",
+  "mutagen": "0.18.1",
+  "code_base": "6305b7ca4bbca9c5d144b14fdb9b5a4a47bbb00e plus GCP provider",
+  "prebatch_client": "same bootstrap fix and timings, before dependency/port batching",
+  "method": "20 alternating old/new pairs, reversed order on odd iterations; same VM, app, Python version and locked runtime dependencies",
+  "total_elapsed_seconds": 594.283796957985,
+  "steps": [
+    {
+      "name": "credential-and-cloud-preflight",
+      "seconds": 3.9291452919715084,
+      "ok": true
+    },
+    {
+      "name": "baseline-client-venv",
+      "seconds": 0.09237270901212469,
+      "returncode": 0
+    },
+    {
+      "name": "baseline-client-dependencies",
+      "seconds": 0.5187213750323281,
+      "returncode": 0
+    },
+    {
+      "name": "baseline-client-wheel",
+      "seconds": 0.023079290986061096,
+      "returncode": 0
+    },
+    {
+      "name": "verify-prebatch-client",
+      "seconds": 0.3715663750190288,
+      "returncode": 0
+    },
+    {
+      "name": "local-mutagen-download-verified",
+      "seconds": 2.550453917006962,
+      "ok": true
+    },
+    {
+      "name": "local-mutagen-version",
+      "seconds": 0.21816433302592486,
+      "returncode": 0
+    },
+    {
+      "name": "python-sample-git-init",
+      "seconds": 0.026909500011242926,
+      "returncode": 0
+    },
+    {
+      "name": "python-sample-git-add",
+      "seconds": 0.015576207952108234,
+      "returncode": 0
+    },
+    {
+      "name": "python-sample-git-commit",
+      "seconds": 0.015260750020388514,
+      "returncode": 0
+    },
+    {
+      "name": "node-sample-git-init",
+      "seconds": 0.0115860840305686,
+      "returncode": 0
+    },
+    {
+      "name": "node-sample-git-add",
+      "seconds": 0.0108162920223549,
+      "returncode": 0
+    },
+    {
+      "name": "node-sample-git-commit",
+      "seconds": 0.01348829100606963,
+      "returncode": 0
+    },
+    {
+      "name": "host-create",
+      "seconds": 156.34694633301115,
+      "returncode": 0
+    },
+    {
+      "name": "host-bootstrap-timeline",
+      "seconds": 0.733961833990179,
+      "returncode": 0
+    },
+    {
+      "name": "host-facts",
+      "seconds": 0.2722521660034545,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-cold-noop-00",
+      "seconds": 0.5045615829876624,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-cold-noop-01",
+      "seconds": 0.5245062499889173,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-cold-noop-02",
+      "seconds": 0.5027893749647774,
+      "returncode": 0
+    },
+    {
+      "name": "python-up-cold",
+      "seconds": 39.15195162501186,
+      "returncode": 0
+    },
+    {
+      "name": "python-ports",
+      "seconds": 0.5290615409612656,
+      "returncode": 0
+    },
+    {
+      "name": "python-local-health",
+      "seconds": 0.07746012497227639
+    },
+    {
+      "name": "python-api-tests",
+      "seconds": 5.330639167048503,
+      "returncode": 0
+    },
+    {
+      "name": "python-create-persisted-item",
+      "seconds": 0.09255325002595782
+    },
+    {
+      "name": "python-status",
+      "seconds": 2.1862118749995716,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-00",
+      "seconds": 0.008719921112060547,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-00",
+      "seconds": 0.20219707489013672,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-00",
+      "seconds": 0.07280206680297852,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-00",
+      "seconds": 0.14715313911437988,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-00",
+      "seconds": 1.6649410724639893,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-00",
+      "seconds": 1.0707440376281738,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-00",
+      "seconds": 0.8764698505401611,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-01",
+      "seconds": 0.012686967849731445,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-01",
+      "seconds": 0.11984109878540039,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-01",
+      "seconds": 0.0702521800994873,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-01",
+      "seconds": 0.14235687255859375,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-01",
+      "seconds": 1.0956189632415771,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-01",
+      "seconds": 1.1565778255462646,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-01",
+      "seconds": 1.0167369842529297,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-02",
+      "seconds": 0.011668920516967773,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-02",
+      "seconds": 0.11970996856689453,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-02",
+      "seconds": 0.07317113876342773,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-02",
+      "seconds": 0.13355803489685059,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-02",
+      "seconds": 1.264976978302002,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-02",
+      "seconds": 1.0131831169128418,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-02",
+      "seconds": 0.9726359844207764,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-03",
+      "seconds": 0.012682914733886719,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-03",
+      "seconds": 0.120574951171875,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-03",
+      "seconds": 0.07846593856811523,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-03",
+      "seconds": 0.15235280990600586,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-03",
+      "seconds": 1.0167570114135742,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-03",
+      "seconds": 1.1454949378967285,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-03",
+      "seconds": 1.057469129562378,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-04",
+      "seconds": 0.011763811111450195,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-04",
+      "seconds": 0.1183156967163086,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-04",
+      "seconds": 0.07125687599182129,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-04",
+      "seconds": 0.13201403617858887,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-04",
+      "seconds": 1.2053351402282715,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-04",
+      "seconds": 1.0567381381988525,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-04",
+      "seconds": 0.9172921180725098,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-05",
+      "seconds": 0.008293867111206055,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-05",
+      "seconds": 0.11957001686096191,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-05",
+      "seconds": 0.07104015350341797,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-05",
+      "seconds": 0.14181923866271973,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-05",
+      "seconds": 1.0622148513793945,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-05",
+      "seconds": 1.2036161422729492,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-05",
+      "seconds": 0.9620940685272217,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-06",
+      "seconds": 0.010959148406982422,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-06",
+      "seconds": 0.12437295913696289,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-06",
+      "seconds": 0.06775498390197754,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-06",
+      "seconds": 0.13697385787963867,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-06",
+      "seconds": 1.183821201324463,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-06",
+      "seconds": 1.0513041019439697,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-06",
+      "seconds": 1.0411009788513184,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-07",
+      "seconds": 0.01238870620727539,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-07",
+      "seconds": 0.12132501602172852,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-07",
+      "seconds": 0.07247114181518555,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-07",
+      "seconds": 0.14708900451660156,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-07",
+      "seconds": 1.0512173175811768,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-07",
+      "seconds": 1.175649881362915,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-07",
+      "seconds": 1.1286299228668213,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-08",
+      "seconds": 0.01145315170288086,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-08",
+      "seconds": 0.1181790828704834,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-08",
+      "seconds": 0.07490420341491699,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-08",
+      "seconds": 0.14190316200256348,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-08",
+      "seconds": 1.2657890319824219,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-08",
+      "seconds": 1.0754499435424805,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-08",
+      "seconds": 0.9111089706420898,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-09",
+      "seconds": 0.010888814926147461,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-09",
+      "seconds": 0.1264808177947998,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-09",
+      "seconds": 0.07297801971435547,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-09",
+      "seconds": 0.15100431442260742,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-09",
+      "seconds": 1.06793212890625,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-09",
+      "seconds": 1.2583131790161133,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-nosync-09",
+      "seconds": 1.1862809658050537,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-10",
+      "seconds": 0.013373851776123047,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-10",
+      "seconds": 0.1201639175415039,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-10",
+      "seconds": 0.07204294204711914,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-10",
+      "seconds": 0.15269804000854492,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-10",
+      "seconds": 1.1703932285308838,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-10",
+      "seconds": 1.1615569591522217,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-11",
+      "seconds": 0.012161016464233398,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-11",
+      "seconds": 0.1183919906616211,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-11",
+      "seconds": 0.06866002082824707,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-11",
+      "seconds": 0.1506338119506836,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-11",
+      "seconds": 1.152796745300293,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-11",
+      "seconds": 1.2165167331695557,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-12",
+      "seconds": 0.0135498046875,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-12",
+      "seconds": 0.12168598175048828,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-12",
+      "seconds": 0.06853413581848145,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-12",
+      "seconds": 0.14220476150512695,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-12",
+      "seconds": 1.2293100357055664,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-12",
+      "seconds": 0.987252950668335,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-13",
+      "seconds": 0.012239217758178711,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-13",
+      "seconds": 0.11848092079162598,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-13",
+      "seconds": 0.07262706756591797,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-13",
+      "seconds": 0.1322181224822998,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-13",
+      "seconds": 1.2153589725494385,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-13",
+      "seconds": 1.1548950672149658,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-14",
+      "seconds": 0.012893199920654297,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-14",
+      "seconds": 0.11941885948181152,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-14",
+      "seconds": 0.06985807418823242,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-14",
+      "seconds": 0.14516210556030273,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-14",
+      "seconds": 1.4016947746276855,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-14",
+      "seconds": 1.1944959163665771,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-15",
+      "seconds": 0.011609077453613281,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-15",
+      "seconds": 0.12503504753112793,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-15",
+      "seconds": 0.0735619068145752,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-15",
+      "seconds": 0.1464710235595703,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-15",
+      "seconds": 1.179265022277832,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-15",
+      "seconds": 1.2274940013885498,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-16",
+      "seconds": 0.012266874313354492,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-16",
+      "seconds": 0.12086606025695801,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-16",
+      "seconds": 0.07430505752563477,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-16",
+      "seconds": 0.14522099494934082,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-16",
+      "seconds": 1.357231855392456,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-16",
+      "seconds": 1.0482549667358398,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-17",
+      "seconds": 0.012076616287231445,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-17",
+      "seconds": 0.11911988258361816,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-17",
+      "seconds": 0.07197093963623047,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-17",
+      "seconds": 0.1436319351196289,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-17",
+      "seconds": 1.0910441875457764,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-17",
+      "seconds": 1.2586517333984375,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-18",
+      "seconds": 0.01198887825012207,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-18",
+      "seconds": 0.12035489082336426,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-18",
+      "seconds": 0.07022786140441895,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-18",
+      "seconds": 0.1401970386505127,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-18",
+      "seconds": 1.180633783340454,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-18",
+      "seconds": 1.003553867340088,
+      "returncode": 0
+    },
+    {
+      "name": "local-python-noop-19",
+      "seconds": 0.010811805725097656,
+      "returncode": 0
+    },
+    {
+      "name": "local-offbox-version-19",
+      "seconds": 0.12232518196105957,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-warm-noop-19",
+      "seconds": 0.07182693481445312,
+      "returncode": 0
+    },
+    {
+      "name": "ssh-docker-noop-19",
+      "seconds": 0.14984822273254395,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-after-19",
+      "seconds": 1.041334867477417,
+      "returncode": 0
+    },
+    {
+      "name": "python-exec-before-19",
+      "seconds": 1.2096130847930908,
+      "returncode": 0
+    },
+    {
+      "name": "python-sync-small-00",
+      "seconds": 0.9923679828643799,
+      "returncode": 0
+    },
+    {
+      "name": "python-sync-small-01",
+      "seconds": 1.1842970848083496,
+      "returncode": 0
+    },
+    {
+      "name": "python-sync-small-02",
+      "seconds": 1.1080169677734375,
+      "returncode": 0
+    },
+    {
+      "name": "python-sync-small-03",
+      "seconds": 1.0066251754760742,
+      "returncode": 0
+    },
+    {
+      "name": "python-sync-small-04",
+      "seconds": 0.986752986907959,
+      "returncode": 0
+    },
+    {
+      "name": "python-sync-10mib",
+      "seconds": 2.2767868041992188,
+      "returncode": 0
+    },
+    {
+      "name": "python-remote-write-and-local-sync-roundtrip",
+      "seconds": 1.0147550106048584,
+      "returncode": 0
+    },
+    {
+      "name": "python-remote-write",
+      "seconds": 0.9894881248474121,
+      "returncode": 0
+    },
+    {
+      "name": "python-stop",
+      "seconds": 0.7992079257965088,
+      "returncode": 0
+    },
+    {
+      "name": "python-resume",
+      "seconds": 13.516610145568848,
+      "returncode": 0
+    },
+    {
+      "name": "python-resume-ports",
+      "seconds": 0.5320160388946533,
+      "returncode": 0
+    },
+    {
+      "name": "python-persistence-verified",
+      "seconds": 1.685716152191162,
+      "returncode": 0
+    },
+    {
+      "name": "python-tests-after-resume",
+      "seconds": 2.6135308742523193,
+      "returncode": 0
+    },
+    {
+      "name": "python-fresh",
+      "seconds": 33.26952385902405,
+      "returncode": 0
+    },
+    {
+      "name": "python-fresh-ports",
+      "seconds": 0.577754020690918,
+      "returncode": 0
+    },
+    {
+      "name": "python-database-reset-verified",
+      "seconds": 2.4342188835144043,
+      "returncode": 0
+    },
+    {
+      "name": "python-source-survived-fresh",
+      "seconds": 0.9746968746185303,
+      "returncode": 0
+    },
+    {
+      "name": "python-exit-42",
+      "seconds": 1.1767539978027344,
+      "returncode": 42
+    },
+    {
+      "name": "python-exit-255",
+      "seconds": 1.1562960147857666,
+      "returncode": 255
+    },
+    {
+      "name": "python-edit-to-http",
+      "seconds": 2.9874491691589355,
+      "returncode": 0
+    },
+    {
+      "name": "python-edit-restore-to-http",
+      "seconds": 3.0102338790893555,
+      "returncode": 0
+    },
+    {
+      "name": "python-edit-to-http",
+      "seconds": 2.695189952850342,
+      "returncode": 0
+    },
+    {
+      "name": "python-edit-restore-to-http",
+      "seconds": 2.7049009799957275,
+      "returncode": 0
+    },
+    {
+      "name": "python-edit-to-http",
+      "seconds": 2.7955987453460693,
+      "returncode": 0
+    },
+    {
+      "name": "python-edit-restore-to-http",
+      "seconds": 2.676156997680664,
+      "returncode": 0
+    },
+    {
+      "name": "python-tests-after-hot-reload",
+      "seconds": 2.6915409564971924,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-00",
+      "seconds": 0.07410502433776855,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-01",
+      "seconds": 0.07820582389831543,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-02",
+      "seconds": 0.07937002182006836,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-03",
+      "seconds": 0.06860208511352539,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-04",
+      "seconds": 0.07740998268127441,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-05",
+      "seconds": 0.07843828201293945,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-06",
+      "seconds": 0.07695579528808594,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-07",
+      "seconds": 0.07026791572570801,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-08",
+      "seconds": 0.08948302268981934,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-09",
+      "seconds": 0.07865095138549805,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-10",
+      "seconds": 0.07336068153381348,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-11",
+      "seconds": 0.07592296600341797,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-12",
+      "seconds": 0.07836508750915527,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-13",
+      "seconds": 0.07761812210083008,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-14",
+      "seconds": 0.07050704956054688,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-15",
+      "seconds": 0.07393693923950195,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-16",
+      "seconds": 0.07536602020263672,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-17",
+      "seconds": 0.0703270435333252,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-18",
+      "seconds": 0.075347900390625,
+      "returncode": 0
+    },
+    {
+      "name": "python-http-warm-19",
+      "seconds": 0.07656598091125488,
+      "returncode": 0
+    },
+    {
+      "name": "node-up-image-warm",
+      "seconds": 39.03042212501168,
+      "returncode": 0
+    },
+    {
+      "name": "node-ports",
+      "seconds": 0.5882431250065565,
+      "returncode": 0
+    },
+    {
+      "name": "node-forwarded-page",
+      "seconds": 0.06996958301169798
+    },
+    {
+      "name": "node-browser-tests",
+      "seconds": 4.61065604200121,
+      "returncode": 0
+    },
+    {
+      "name": "node-production-build",
+      "seconds": 1.6542515420005657,
+      "returncode": 0
+    },
+    {
+      "name": "node-status",
+      "seconds": 2.343580166983884,
+      "returncode": 0
+    },
+    {
+      "name": "node-exec-warm-00",
+      "seconds": 1.001846208004281,
+      "returncode": 0
+    },
+    {
+      "name": "node-exec-warm-01",
+      "seconds": 1.0307064169901423,
+      "returncode": 0
+    },
+    {
+      "name": "node-exec-warm-02",
+      "seconds": 0.9376651250058785,
+      "returncode": 0
+    },
+    {
+      "name": "node-exec-warm-03",
+      "seconds": 0.9419944589608349,
+      "returncode": 0
+    },
+    {
+      "name": "node-exec-warm-04",
+      "seconds": 0.9777972080046311,
+      "returncode": 0
+    },
+    {
+      "name": "node-stop",
+      "seconds": 0.7560841249651276,
+      "returncode": 0
+    },
+    {
+      "name": "node-resume",
+      "seconds": 10.505777959013358,
+      "returncode": 0
+    },
+    {
+      "name": "node-browser-tests-after-resume",
+      "seconds": 4.376359082991257,
+      "returncode": 0
+    },
+    {
+      "name": "host-resource-snapshot",
+      "seconds": 1.5667977909906767,
+      "returncode": 0
+    },
+    {
+      "name": "python-remove",
+      "seconds": 1.2626995830214582,
+      "returncode": 0
+    },
+    {
+      "name": "node-remove",
+      "seconds": 1.156017541012261,
+      "returncode": 0
+    },
+    {
+      "name": "cleanup-verified",
+      "seconds": 103.11997420800617,
+      "ok": true
+    },
+    {
+      "name": "host-destroy",
+      "seconds": 96.46306241705315,
+      "returncode": 0
+    },
+    {
+      "name": "mutagen-daemon-stop",
+      "seconds": 0.011654041998554021,
+      "returncode": 0
+    }
+  ],
+  "distributions": {
+    "local-python-noop": {
+      "count": 20,
+      "median_seconds": 0.012032747268676758,
+      "p95_nearest_rank_seconds": 0.013373851776123047,
+      "samples_seconds": [
+        0.008719921112060547,
+        0.012686967849731445,
+        0.011668920516967773,
+        0.012682914733886719,
+        0.011763811111450195,
+        0.008293867111206055,
+        0.010959148406982422,
+        0.01238870620727539,
+        0.01145315170288086,
+        0.010888814926147461,
+        0.013373851776123047,
+        0.012161016464233398,
+        0.0135498046875,
+        0.012239217758178711,
+        0.012893199920654297,
+        0.011609077453613281,
+        0.012266874313354492,
+        0.012076616287231445,
+        0.01198887825012207,
+        0.010811805725097656
+      ]
+    },
+    "local-offbox-version": {
+      "count": 20,
+      "median_seconds": 0.12025940418243408,
+      "p95_nearest_rank_seconds": 0.1264808177947998,
+      "samples_seconds": [
+        0.20219707489013672,
+        0.11984109878540039,
+        0.11970996856689453,
+        0.120574951171875,
+        0.1183156967163086,
+        0.11957001686096191,
+        0.12437295913696289,
+        0.12132501602172852,
+        0.1181790828704834,
+        0.1264808177947998,
+        0.1201639175415039,
+        0.1183919906616211,
+        0.12168598175048828,
+        0.11848092079162598,
+        0.11941885948181152,
+        0.12503504753112793,
+        0.12086606025695801,
+        0.11911988258361816,
+        0.12035489082336426,
+        0.12232518196105957
+      ]
+    },
+    "ssh-cold-noop": {
+      "count": 3,
+      "median_seconds": 0.5045615829876624,
+      "p95_nearest_rank_seconds": 0.5245062499889173,
+      "samples_seconds": [
+        0.5045615829876624,
+        0.5245062499889173,
+        0.5027893749647774
+      ]
+    },
+    "ssh-warm-noop": {
+      "count": 20,
+      "median_seconds": 0.0720069408416748,
+      "p95_nearest_rank_seconds": 0.07490420341491699,
+      "samples_seconds": [
+        0.07280206680297852,
+        0.0702521800994873,
+        0.07317113876342773,
+        0.07846593856811523,
+        0.07125687599182129,
+        0.07104015350341797,
+        0.06775498390197754,
+        0.07247114181518555,
+        0.07490420341491699,
+        0.07297801971435547,
+        0.07204294204711914,
+        0.06866002082824707,
+        0.06853413581848145,
+        0.07262706756591797,
+        0.06985807418823242,
+        0.0735619068145752,
+        0.07430505752563477,
+        0.07197093963623047,
+        0.07022786140441895,
+        0.07182693481445312
+      ]
+    },
+    "ssh-docker-noop": {
+      "count": 20,
+      "median_seconds": 0.14439702033996582,
+      "p95_nearest_rank_seconds": 0.15235280990600586,
+      "samples_seconds": [
+        0.14715313911437988,
+        0.14235687255859375,
+        0.13355803489685059,
+        0.15235280990600586,
+        0.13201403617858887,
+        0.14181923866271973,
+        0.13697385787963867,
+        0.14708900451660156,
+        0.14190316200256348,
+        0.15100431442260742,
+        0.15269804000854492,
+        0.1506338119506836,
+        0.14220476150512695,
+        0.1322181224822998,
+        0.14516210556030273,
+        0.1464710235595703,
+        0.14522099494934082,
+        0.1436319351196289,
+        0.1401970386505127,
+        0.14984822273254395
+      ]
+    },
+    "python-exec-before": {
+      "count": 20,
+      "median_seconds": 1.2130649089813232,
+      "p95_nearest_rank_seconds": 1.4016947746276855,
+      "samples_seconds": [
+        1.6649410724639893,
+        1.1565778255462646,
+        1.264976978302002,
+        1.1454949378967285,
+        1.2053351402282715,
+        1.2036161422729492,
+        1.183821201324463,
+        1.175649881362915,
+        1.2657890319824219,
+        1.2583131790161133,
+        1.1703932285308838,
+        1.2165167331695557,
+        1.2293100357055664,
+        1.1548950672149658,
+        1.4016947746276855,
+        1.2274940013885498,
+        1.357231855392456,
+        1.2586517333984375,
+        1.180633783340454,
+        1.2096130847930908
+      ]
+    },
+    "python-exec-after": {
+      "count": 20,
+      "median_seconds": 1.0650734901428223,
+      "p95_nearest_rank_seconds": 1.1944959163665771,
+      "samples_seconds": [
+        1.0707440376281738,
+        1.0956189632415771,
+        1.0131831169128418,
+        1.0167570114135742,
+        1.0567381381988525,
+        1.0622148513793945,
+        1.0513041019439697,
+        1.0512173175811768,
+        1.0754499435424805,
+        1.06793212890625,
+        1.1615569591522217,
+        1.152796745300293,
+        0.987252950668335,
+        1.2153589725494385,
+        1.1944959163665771,
+        1.179265022277832,
+        1.0482549667358398,
+        1.0910441875457764,
+        1.003553867340088,
+        1.041334867477417
+      ]
+    },
+    "python-exec-nosync": {
+      "count": 10,
+      "median_seconds": 0.994686484336853,
+      "p95_nearest_rank_seconds": 1.1862809658050537,
+      "samples_seconds": [
+        0.8764698505401611,
+        1.0167369842529297,
+        0.9726359844207764,
+        1.057469129562378,
+        0.9172921180725098,
+        0.9620940685272217,
+        1.0411009788513184,
+        1.1286299228668213,
+        0.9111089706420898,
+        1.1862809658050537
+      ]
+    },
+    "node-exec-warm": {
+      "count": 5,
+      "median_seconds": 0.9777972080046311,
+      "p95_nearest_rank_seconds": 1.0307064169901423,
+      "samples_seconds": [
+        1.001846208004281,
+        1.0307064169901423,
+        0.9376651250058785,
+        0.9419944589608349,
+        0.9777972080046311
+      ]
+    },
+    "python-sync-small": {
+      "count": 5,
+      "median_seconds": 1.0066251754760742,
+      "p95_nearest_rank_seconds": 1.1842970848083496,
+      "samples_seconds": [
+        0.9923679828643799,
+        1.1842970848083496,
+        1.1080169677734375,
+        1.0066251754760742,
+        0.986752986907959
+      ]
+    },
+    "python-edit-to-http": {
+      "count": 3,
+      "median_seconds": 2.7955987453460693,
+      "p95_nearest_rank_seconds": 2.9874491691589355,
+      "samples_seconds": [
+        2.9874491691589355,
+        2.695189952850342,
+        2.7955987453460693
+      ]
+    },
+    "python-edit-restore-to-http": {
+      "count": 3,
+      "median_seconds": 2.7049009799957275,
+      "p95_nearest_rank_seconds": 3.0102338790893555,
+      "samples_seconds": [
+        3.0102338790893555,
+        2.7049009799957275,
+        2.676156997680664
+      ]
+    },
+    "python-http-warm": {
+      "count": 20,
+      "median_seconds": 0.07624447345733643,
+      "p95_nearest_rank_seconds": 0.07937002182006836,
+      "samples_seconds": [
+        0.07410502433776855,
+        0.07820582389831543,
+        0.07937002182006836,
+        0.06860208511352539,
+        0.07740998268127441,
+        0.07843828201293945,
+        0.07695579528808594,
+        0.07026791572570801,
+        0.08948302268981934,
+        0.07865095138549805,
+        0.07336068153381348,
+        0.07592296600341797,
+        0.07836508750915527,
+        0.07761812210083008,
+        0.07050704956054688,
+        0.07393693923950195,
+        0.07536602020263672,
+        0.0703270435333252,
+        0.075347900390625,
+        0.07656598091125488
+      ]
+    }
+  },
+  "warm_exec_phases": {
+    "SyncManager.flush": {
+      "count": 20,
+      "median_seconds": 0.09642447950318456,
+      "samples_seconds": [
+        0.09688087500398979,
+        0.08972666703630239,
+        0.09381233301246539,
+        0.0962630839785561,
+        0.09292529098456725,
+        0.09730604197829962,
+        0.0940083329915069,
+        0.10495954198995605,
+        0.09744058299111202,
+        0.09737091697752476,
+        0.09971145895542577,
+        0.09206529101356864,
+        0.09142883302411065,
+        0.11314362497068942,
+        0.1098791669937782,
+        0.09119266696507111,
+        0.08308641699841246,
+        0.09735683299368247,
+        0.09658587502781302,
+        0.09445070795482025
+      ]
+    },
+    "Executor.install": {
+      "count": 20,
+      "median_seconds": 0.12345674997777678,
+      "samples_seconds": [
+        0.11558683402836323,
+        0.1235808749916032,
+        0.13559083302970976,
+        0.12065679201623425,
+        0.1257648339960724,
+        0.12318541598506272,
+        0.1269229159806855,
+        0.12456495896913111,
+        0.11482887499732897,
+        0.11793383298208937,
+        0.1142347080167383,
+        0.12333262496395037,
+        0.12066650000633672,
+        0.13118741702055559,
+        0.12985162500990555,
+        0.11906345799798146,
+        0.16392066603293642,
+        0.13290545903146267,
+        0.12160962499910966,
+        0.13152079103747383
+      ]
+    },
+    "PortManager.restore": {
+      "count": 20,
+      "median_seconds": 0.3724158749973867,
+      "samples_seconds": [
+        0.4183494580211118,
+        0.36470158299198374,
+        0.3399522079853341,
+        0.3310965840355493,
+        0.3925976250320673,
+        0.37979762500617653,
+        0.38526774995261803,
+        0.3373532080440782,
+        0.4031268749968149,
+        0.3775475419824943,
+        0.4754997909767553,
+        0.4670168340089731,
+        0.336436000012327,
+        0.3560795840458013,
+        0.3506403330247849,
+        0.5049902919563465,
+        0.3672842080122791,
+        0.38666904100682586,
+        0.3455184170161374,
+        0.356369957968127
+      ]
+    },
+    "Executor.run": {
+      "count": 20,
+      "median_seconds": 0.18088350049220026,
+      "samples_seconds": [
+        0.1807042920263484,
+        0.2328520420123823,
+        0.18398812500527129,
+        0.17912750004325062,
+        0.1778366249636747,
+        0.17322716698981822,
+        0.17990720801753923,
+        0.18493858398869634,
+        0.18214049999369308,
+        0.1810627089580521,
+        0.18017429194878787,
+        0.1766784589854069,
+        0.1713440829771571,
+        0.2237862499896437,
+        0.18363424995914102,
+        0.18207937496481463,
+        0.16819445800501853,
+        0.17772325000260025,
+        0.1834859590162523,
+        0.1829283750266768
+      ]
+    }
+  },
+  "startup_phases": {
+    "python-up-cold": [
+      {
+        "phase": "Runtime.mutate",
+        "seconds": 0.17334795801434666
+      },
+      {
+        "phase": "SyncManager.ensure",
+        "seconds": 2.215311083011329
+      },
+      {
+        "phase": "Runtime.mutate",
+        "seconds": 6.579752208024729
+      },
+      {
+        "phase": "Runtime.wait_ready",
+        "seconds": 1.5003570830449462
+      },
+      {
+        "phase": "SyncManager.flush",
+        "seconds": 0.12170687498291954
+      },
+      {
+        "phase": "Executor._stage",
+        "seconds": 0.9429251670371741
+      },
+      {
+        "phase": "Executor.install",
+        "seconds": 1.327782083011698
+      },
+      {
+        "phase": "Executor._stage",
+        "seconds": 26.28315274999477
+      },
+      {
+        "phase": "PortManager.restore",
+        "seconds": 0.4524657499860041
+      },
+      {
+        "phase": "Runtime.up",
+        "seconds": 38.99023379199207
+      }
+    ],
+    "node-up-image-warm": [
+      {
+        "phase": "Runtime.mutate",
+        "seconds": 0.180800249974709
+      },
+      {
+        "phase": "SyncManager.ensure",
+        "seconds": 0.1949658750090748
+      },
+      {
+        "phase": "Runtime.mutate",
+        "seconds": 0.8221942500094883
+      },
+      {
+        "phase": "Runtime.wait_ready",
+        "seconds": 1.512325707997661
+      },
+      {
+        "phase": "SyncManager.flush",
+        "seconds": 0.10905337502481416
+      },
+      {
+        "phase": "Executor._stage",
+        "seconds": 21.30239220801741
+      },
+      {
+        "phase": "Executor.install",
+        "seconds": 21.667509124963544
+      },
+      {
+        "phase": "Executor._stage",
+        "seconds": 13.637740417034365
+      },
+      {
+        "phase": "PortManager.restore",
+        "seconds": 0.34218270902056247
+      },
+      {
+        "phase": "Runtime.up",
+        "seconds": 38.80507508298615
+      }
+    ]
+  },
+  "bootstrap_user_script_seconds": 73.639,
+  "resource_observations": {
+    "samples": 109,
+    "max_host_used_gib": 1.5165290832519531,
+    "min_host_available_gib": 14.09442138671875,
+    "min_disk_available_gib": 38.69254684448242,
+    "outer_container_peak_mib": {
+      "python": 294.0,
+      "node": 364.8
+    },
+    "final_oom_killed": false
+  },
+  "cleanup": {
+    "owned_remaining": {
+      "instances": [],
+      "disks": [],
+      "subnetworks": [],
+      "addresses": [],
+      "networks": [],
+      "firewalls": [],
+      "routes": []
+    },
+    "baseline_resource_ids_preserved": true,
+    "inventory_matches_baseline": true,
+    "no_vm_service_account": true
+  },
+  "billing": {
+    "currency": "USD",
+    "public_catalog_checked": "2026-10-23",
+    "skus": [
+      {
+        "sku_id": "6D24-3682-D284",
+        "description": "E2 Instance Ram running in Virginia",
+        "regions": [
+          "us-east4"
+        ],
+        "pricing_expression": {
+          "usageUnit": "GiBy.h",
+          "displayQuantity": 1,
+          "tieredRates": [
+            {
+              "startUsageAmount": 0,
+              "unitPrice": {
+                "currencyCode": "USD",
+                "units": "0",
+                "nanos": 3291990
+              }
+            }
+          ],
+          "usageUnitDescription": "gibibyte hour",
+          "baseUnit": "By.s",
+          "baseUnitDescription": "byte second",
+          "baseUnitConversionFactor": 3865470566400
+        },
+        "effective_time": "2026-10-23T07:00:00Z"
+      },
+      {
+        "sku_id": "7D52-6D58-14FF",
+        "description": "Balanced PD Capacity in Virginia",
+        "regions": [
+          "us-east4"
+        ],
+        "pricing_expression": {
+          "usageUnit": "GiBy.mo",
+          "displayQuantity": 1,
+          "tieredRates": [
+            {
+              "startUsageAmount": 0,
+              "unitPrice": {
+                "currencyCode": "USD",
+                "units": "0",
+                "nanos": 110000000
+              }
+            }
+          ],
+          "usageUnitDescription": "gibibyte month",
+          "baseUnit": "By.s",
+          "baseUnitDescription": "byte second",
+          "baseUnitConversionFactor": 2875910101401600.0
+        },
+        "effective_time": "2026-10-23T07:00:00Z"
+      },
+      {
+        "sku_id": "C054-7F72-A02E",
+        "description": "External IP Charge on a Standard VM",
+        "regions": [
+          "global"
+        ],
+        "pricing_expression": {
+          "usageUnit": "h",
+          "displayQuantity": 1,
+          "tieredRates": [
+            {
+              "startUsageAmount": 0,
+              "unitPrice": {
+                "currencyCode": "USD",
+                "units": "0",
+                "nanos": 0
+              }
+            },
+            {
+              "startUsageAmount": 744,
+              "unitPrice": {
+                "currencyCode": "USD",
+                "units": "0",
+                "nanos": 5000000
+              }
+            }
+          ],
+          "usageUnitDescription": "hour",
+          "baseUnit": "s",
+          "baseUnitDescription": "second",
+          "baseUnitConversionFactor": 3600
+        },
+        "effective_time": "2026-10-23T07:00:00Z"
+      },
+      {
+        "sku_id": "D5C5-E209-22D3",
+        "description": "E2 Instance Core running in Virginia",
+        "regions": [
+          "us-east4"
+        ],
+        "pricing_expression": {
+          "usageUnit": "h",
+          "displayQuantity": 1,
+          "tieredRates": [
+            {
+              "startUsageAmount": 0,
+              "unitPrice": {
+                "currencyCode": "USD",
+                "units": "0",
+                "nanos": 24567450
+              }
+            }
+          ],
+          "usageUnitDescription": "hour",
+          "baseUnit": "s",
+          "baseUnitDescription": "second",
+          "baseUnitConversionFactor": 3600
+        },
+        "effective_time": "2026-10-23T07:00:00Z"
+      }
+    ],
+    "vm_hourly": 0.15094164,
+    "disk_hourly_744_hour_month": 0.00739247311827957,
+    "ipv4_hourly_upper_tier": 0.005,
+    "conservative_full_run_compute_disk_ip_estimate": 0.026963004699082277,
+    "exclusions": "Network egress, Secret Manager and IAM API operations, credits, discounts and taxes; pending actual billing. Entire harness interval used, exceeding resource lifetime."
+  },
+  "harness_correction": "Canonicalize macOS /var and /private/var paths in custom persistence probe; resume remaining Python checks separately. Failed lookup and diagnostic pause excluded from interaction distributions.",
+  "limitations": [
+    "Small single-host manual diagnostic run, not a benchmark guarantee or cloud CI.",
+    "Different region, machine memory and disk prevent isolating provider effects across Hetzner/GCP.",
+    "Resource sampling can miss short peaks.",
+    "CLI totals include Python startup and temporary instrumentation; phase times can overlap."
+  ]
+}

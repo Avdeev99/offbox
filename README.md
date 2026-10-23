@@ -17,7 +17,7 @@ offbox exec -- pytest
 offbox ports
 ```
 
-`setup` checks tools and offers either a new Hetzner host or an existing SSH server. Creating a cloud host requires your own account and credentials. Review its size and current price before approving creation. Existing-host initialization needs Ubuntu 24.04, passwordless sudo and UID 1000 available; see [providers](docs/providers.md).
+`setup` checks tools and offers a new Hetzner/Google Cloud host or an existing SSH server. Creating a cloud host requires your own account and credentials. Review its size and current price before approving creation. Existing-host initialization needs Ubuntu 24.04, passwordless sudo and UID 1000 available; see [providers](docs/providers.md).
 
 When finished with a worktree, use `offbox rm --yes`. To delete a cloud host and stop its server charges:
 
@@ -65,7 +65,7 @@ Use `offbox --timings up` or `offbox --timings exec -- COMMAND` to see stage dur
 - OpenTofu 1.8+ or Terraform 1.6+ for cloud provisioning. If neither is installed, Offbox can download verified pinned OpenTofu. Mutagen must be installed separately.
 - Trusted personal projects. Environment containers are privileged and share the host kernel; they are not a sandbox for untrusted code.
 
-Supported built-in providers are Hetzner/OpenTofu and existing SSH hosts. Additional cloud providers and arm64 images are outside v0.1. See [limits](docs/limits.md) and [security](docs/security.md).
+Supported built-in providers are Hetzner, Google Cloud and existing SSH hosts. Other cloud providers and arm64 images are outside the current scope. Cloud provisioning uses OpenTofu or Terraform. See [limits](docs/limits.md) and [security](docs/security.md).
 
 ## Configuration and examples
 
@@ -97,6 +97,6 @@ uv build
 
 CI runs strict lint/type checks, a Linux/macOS × Python 3.12/3.13 unit matrix and native amd64 image builds. The focused Linux Docker smoke job exercises real SSH, Mutagen, execution and forwarding with disposable local containers. It uses no cloud credentials or billable cloud resources. Cloud API provisioning and VM bootstrap remain unverified by that job; browser, OOM and performance tests are outside its scope.
 
-A separately approved [real Hetzner benchmark](docs/benchmarks/2026-10-23-hetzner.md) exercised provisioning and both sample apps, including browser tests, then verified cloud cleanup. Its measurements and limits are recorded for comparison.
+Separately approved [Hetzner](docs/benchmarks/2026-10-23-hetzner.md) and [Google Cloud](docs/benchmarks/2026-10-23-gcp.md) benchmarks exercised provisioning and both sample apps, including browser tests, then verified cloud cleanup. The Google Cloud run also compares command batching on the same VM. Measurements and comparison limits are recorded in the reports.
 
 Release workflows are prepared, but PyPI publishing and release tags are deferred. The public universal image follows the compatibility series defined by `DEFAULT_IMAGE` in [the package](src/offbox/__init__.py). See [CONTRIBUTING.md](CONTRIBUTING.md) for development, image and future publishing instructions. Licensed under [MIT](LICENSE).
