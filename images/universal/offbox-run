@@ -61,6 +61,9 @@ find "$state_dir" -maxdepth 1 -type f -mmin +1440 -print | while IFS= read -r ex
         *) continue ;;
     esac
     case "$expired_id" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+    if [ -f "$state_dir/$expired_id.code" ] && [ "$expired_name" != "$expired_id.code" ]; then
+        continue
+    fi
     expired_pid=$(cat "$state_dir/$expired_id.pid" 2>/dev/null || :)
     expired_start=$(cat "$state_dir/$expired_id.start" 2>/dev/null || :)
     case "$expired_pid:$expired_start" in
