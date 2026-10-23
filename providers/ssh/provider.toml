@@ -1,0 +1,4 @@
+name = "ssh"
+description = "An existing Ubuntu host reached over SSH"
+driver = "none"
+credentials_env = []

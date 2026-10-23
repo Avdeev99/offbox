@@ -1,0 +1,15 @@
+#cloud-config
+ssh_deletekeys: true
+ssh_genkeytypes: []
+ssh_keys:
+  ed25519_private: {{ private_host_key | tojson }}
+  ed25519_public: {{ public_host_key | tojson }}
+disable_root: true
+ssh_pwauth: false
+write_files:
+  - path: /usr/local/sbin/offbox-host-init
+    owner: root:root
+    permissions: "0700"
+    content: {{ script | tojson }}
+runcmd:
+  - {{ bootstrap_argv | tojson }}

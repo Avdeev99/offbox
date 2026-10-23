@@ -1,0 +1,9 @@
+name = "hetzner"
+description = "Hetzner Cloud Ubuntu host"
+driver = "tofu"
+credentials_env = ["HCLOUD_TOKEN"]
+
+[defaults]
+size = "ccx33"
+region = "fsn1"
+image = "ubuntu-24.04"

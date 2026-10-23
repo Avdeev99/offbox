@@ -13,7 +13,9 @@ _SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY)$", re.IGNORECASE)
 
 
 def register_secrets(env: Mapping[str, str]) -> None:
-    _registered_secrets.update(value for name, value in env.items() if value and _SECRET_NAME.search(name))
+    values = [value for name, value in env.items() if value and _SECRET_NAME.search(name)]
+    _registered_secrets.update(values)
+    _registered_secrets.update(part for value in values for part in value.splitlines() if part)
 
 
 def redact(value: str, env: Mapping[str, str] | None = None) -> str:

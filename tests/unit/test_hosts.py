@@ -1,0 +1,575 @@
+from pathlib import Path
+
+import pytest
+
+from offbox.errors import ConnectionError_, OffboxError, PreconditionError
+from offbox.paths import Paths
+from offbox.runner import FakeRunner, Runner, Script
+
+
+def paths_at(root: Path) -> Paths:
+    return Paths(root / "config", root / "state", root / "cache", root / "control")
+
+
+def test_provider_override_and_path_rejection(tmp_path: Path) -> None:
+    from offbox.providers import discover_provider
+
+    paths = paths_at(tmp_path)
+    directory = paths.config / "providers/hetzner"
+    directory.mkdir(parents=True)
+    (directory / "provider.toml").write_text('name="hetzner"\ndescription="override"\ndriver="tofu"\n')
+    assert discover_provider("hetzner", paths).manifest.description == "override"
+    with pytest.raises(PreconditionError):
+        discover_provider("../outside", paths)
+
+
+def test_tofu_exact_commands_and_output(tmp_path: Path) -> None:
+    from offbox.drivers.base import HostVariables
+    from offbox.drivers.tofu import TofuDriver
+
+    runner = FakeRunner(
+        [
+            Script(prefix=["tofu", "init"]),
+            Script(prefix=["tofu", "apply"]),
+            Script(
+                prefix=["tofu", "output"],
+                stdout='{"ip":{"value":"192.0.2.1","type":"string","sensitive":false},"ssh_user":{"value":"offbox","type":"string","sensitive":false}}',
+            ),
+            Script(prefix=["tofu", "destroy"]),
+        ]
+    )
+    workspace = tmp_path / "tofu"
+    workspace.mkdir()
+    driver = TofuDriver(runner, workspace, tmp_path / "cache", {"HCLOUD_TOKEN": "synthetic-test-token"}, Path("tofu"))
+    result = driver.create(
+        HostVariables(
+            name="offbox-main",
+            size="ccx33",
+            region="fsn1",
+            image="ubuntu-24.04",
+            ssh_public_key="public",
+            user_data="cloud-init",
+            labels={"offbox": "1", "offbox-host": "main"},
+        )
+    )
+    assert result.ip == "192.0.2.1"
+    assert result.ssh_user == "offbox"
+    driver.destroy()
+    assert [call.argv for call in runner.calls] == [
+        ["tofu", "init", "-input=false"],
+        ["tofu", "apply", "-auto-approve", "-input=false"],
+        ["tofu", "output", "-json"],
+        ["tofu", "destroy", "-auto-approve", "-input=false"],
+    ]
+    assert all(call.cwd == workspace for call in runner.calls)
+    assert runner.calls[0].env == {
+        "HCLOUD_TOKEN": "synthetic-test-token",
+        "TF_IN_AUTOMATION": "1",
+        "TF_INPUT": "0",
+        "TF_PLUGIN_CACHE_DIR": str(tmp_path / "cache/tofu-plugins"),
+        "TF_CLI_ARGS": "-no-color",
+    }
+    assert (workspace / "offbox.auto.tfvars.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_missing_provider_credential(tmp_path: Path) -> None:
+    from offbox.providers import ProviderManifest, credentials_env
+
+    manifest = ProviderManifest(name="custom", description="custom", driver="tofu", credentials_env=["CUSTOM_TOKEN"])
+    with pytest.raises(PreconditionError, match="CUSTOM_TOKEN") as caught:
+        credentials_env(manifest, paths_at(tmp_path), {})
+    assert caught.value.exit_code == 3
+    assert caught.value.fix == "Set CUSTOM_TOKEN before retrying."
+
+
+def test_ssh_include_idempotent_and_preserves_user_config(tmp_path: Path) -> None:
+    from offbox.ssh import ensure_include
+
+    paths = paths_at(tmp_path)
+    config = tmp_path / "home/.ssh/config"
+    config.parent.mkdir(parents=True)
+    config.write_text("Host personal\n  HostName example.com\n")
+    ensure_include(paths, config)
+    first = config.read_text()
+    ensure_include(paths, config)
+    assert config.read_text() == first
+    assert first.endswith("Host personal\n  HostName example.com\n")
+    assert first.count("Include ") == 1
+    assert config.stat().st_mode & 0o777 == 0o600
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.elapsed = 0.0
+
+    def now(self) -> float:
+        return self.elapsed
+
+    def sleep(self, seconds: float) -> None:
+        self.elapsed += seconds
+
+
+def test_readiness_timeout_uses_clock_and_collects_diagnostics(tmp_path: Path) -> None:
+    from offbox.host.ready import wait_ready
+
+    runner = FakeRunner([Script(prefix=["ssh"], stdout="bootstrap failed")])
+    clock = FakeClock()
+    with pytest.raises(ConnectionError_) as caught:
+        wait_ready(
+            "main",
+            "192.0.2.1",
+            22,
+            runner,
+            tmp_path / "logs/run.log",
+            clock=clock,
+            probe=lambda _address, _port, _timeout: False,
+            tcp_timeout=6,
+        )
+    assert clock.elapsed == 6
+    assert "offbox host ssh main" in (caught.value.fix or "")
+    assert runner.calls[-1].argv[-1] == "sudo -n tail -n 40 /var/log/cloud-init-output.log"
+
+
+def test_cloud_init_snapshot() -> None:
+    from offbox.host.cloudinit import render_cloud_init
+
+    rendered = render_cloud_init("ssh-ed25519 AAAA user", "PRIVATE\nKEY\n", "ssh-ed25519 BBBB host", script="#!/bin/sh\nset -eu\n")
+    assert rendered == (Path(__file__).parents[1] / "fixtures/cloud-init.yaml").read_text()
+    assert "OFFBOX_HARDEN=1" in rendered
+    assert "OFFBOX_VERSION=0.0.1" in rendered
+
+
+def test_failed_apply_is_retained_for_destroy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.host.create import CreateOptions, create_host
+    from offbox.state import StateStore
+
+    paths = paths_at(tmp_path)
+    provider = paths.config / "providers/custom"
+    provider.mkdir(parents=True)
+    (provider / "provider.toml").write_text(
+        'name="custom"\ndescription="custom"\ndriver="tofu"\n[defaults]\nsize="small"\nregion="test"\nimage="ubuntu"\n'
+    )
+    (provider / "main.tf").write_text("original provider")
+    key = tmp_path / "identity"
+    key.write_text("client private key")
+    key.with_name("identity.pub").write_text("ssh-ed25519 AAAA client")
+
+    def generated_key(_runner: Runner, _path: Path) -> tuple[str, str]:
+        return "host private key", "ssh-ed25519 BBBB host"
+
+    monkeypatch.setattr("offbox.host.create.generate_host_key", generated_key)
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-add"], returncode=1),
+            Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA"),
+            Script(prefix=["tofu", "init"]),
+            Script(prefix=["tofu", "apply"], returncode=1, stderr="apply failed"),
+        ]
+    )
+    with pytest.raises(OffboxError, match="Creating host main failed"):
+        create_host(
+            paths,
+            runner,
+            CreateOptions(name="main", provider="custom", ssh_key=key),
+            executable=Path("tofu"),
+            ssh_config=tmp_path / "ssh/config",
+        )
+    state = StateStore(paths.state).read()
+    assert state.hosts["main"].phase == "creating"
+    assert state.default_host is None
+    assert state.hosts["main"].provider_files_hash
+    assert (paths.state / "hosts/main/tofu/main.tf").read_text() == "original provider"
+    assert (paths.state / "hosts/main/tofu/offbox.auto.tfvars.json").exists()
+
+
+def test_remote_argv_quotes_shell_metacharacters() -> None:
+    from offbox.ssh import ssh_argv
+
+    assert ssh_argv("main", ["printf", "%s", "a; touch /tmp/unwanted"]) == [
+        "ssh",
+        "offbox-main",
+        "--",
+        "printf %s 'a; touch /tmp/unwanted'",
+    ]
+    with pytest.raises(PreconditionError):
+        ssh_argv("-oProxyCommand=bad", ["true"])
+
+
+def test_destroy_retains_workspace_and_state_when_provider_fails(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from offbox.host.destroy import destroy_host
+    from offbox.state import HostState, State, StateStore
+
+    paths = paths_at(tmp_path)
+    workspace = paths.state / "hosts/main/tofu"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="custom"\ndescription="test"\ndriver="tofu"\n')
+    host = HostState(
+        name="main",
+        provider="custom",
+        address="",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+        phase="creating",
+    )
+    StateStore(paths.state).write(State(hosts={"main": host}))
+    runner = FakeRunner([Script(prefix=["tofu", "destroy"], returncode=1, stderr="provider offline")])
+    with pytest.raises(OffboxError):
+        destroy_host(paths, runner, "main", executable=Path("tofu"))
+    assert StateStore(paths.state).read().hosts["main"] == host
+    assert workspace.is_dir()
+
+
+def test_existing_host_requires_explicit_host_key_acceptance(tmp_path: Path) -> None:
+    from offbox.host.init import InitOptions, init_host
+
+    runner = FakeRunner([Script(prefix=["ssh-keyscan"], stdout="192.0.2.1 ssh-ed25519 AAAA\n")])
+    with pytest.raises(PreconditionError, match="accept-host-key"):
+        init_host(paths_at(tmp_path), runner, InitOptions(target="dev@192.0.2.1"))
+    assert not runner.calls
+
+
+def test_existing_host_bootstrap_is_nonhardening_and_pinned(tmp_path: Path) -> None:
+    from offbox.host.init import InitOptions, init_host
+    from offbox.state import StateStore
+
+    paths = paths_at(tmp_path)
+    key = tmp_path / "identity"
+    key.write_text("client private")
+    key.with_name("identity.pub").write_text("ssh-ed25519 AAAA client")
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-keyscan"], stdout="192.0.2.1 ssh-ed25519 AAAA\n"),
+            Script(prefix=["ssh-add"], returncode=1),
+            Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA"),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    result = init_host(
+        paths,
+        runner,
+        InitOptions(target="dev@192.0.2.1", ssh_key=key, accept_host_key=True),
+        ssh_config=tmp_path / "ssh/config",
+        clock=FakeClock(),
+        probe=lambda _a, _p, _t: True,
+    )
+    assert result.phase == "ready"
+    assert StateStore(paths.state).read().default_host == "main"
+    bootstrap = runner.calls[-2]
+    assert "OFFBOX_HARDEN=0" in bootstrap.argv[-1]
+    assert "OFFBOX_VERSION=0.0.1" in bootstrap.argv[-1]
+    assert "sudo -n env" in bootstrap.argv[-1]
+    assert "StrictHostKeyChecking=yes" in bootstrap.argv
+    assert bootstrap.input is not None and "OFFBOX_HARDEN" in bootstrap.input
+    assert (paths.state / "hosts/main/known_hosts").read_text() == "offbox-main ssh-ed25519 AAAA\n"
+
+
+def test_host_list_and_use_keep_user_config_readonly(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from offbox.cli.host import host_report, use_host
+    from offbox.state import HostState, State, StateStore
+
+    paths = paths_at(tmp_path)
+    paths.config.mkdir(parents=True)
+    paths.user_config.write_text('default_host="unused"\n')
+    host = HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        known_hosts_path=tmp_path / "known_hosts",
+    )
+    StateStore(paths.state).write(State(hosts={"main": host}))
+    runner = FakeRunner([Script(prefix=["ssh"], returncode=0)])
+    report = host_report(paths, runner)
+    assert report.hosts[0].reachable is True
+    assert report.hosts[0].envs == 0
+    use_host(paths, "main")
+    assert StateStore(paths.state).read().default_host == "main"
+    assert paths.user_config.read_text() == 'default_host="unused"\n'
+
+
+def test_host_destroy_noninteractive_requires_yes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+    from offbox.state import HostState, State, StateStore
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    paths = Paths.discover()
+    host = HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        known_hosts_path=tmp_path / "known_hosts",
+    )
+    StateStore(paths.state).write(State(hosts={"main": host}, default_host="main"))
+    result = CliRunner().invoke(app, ["host", "destroy"])
+    assert result.exit_code == 3
+    assert "--yes" in result.stderr
+    assert "Fix:" in result.stderr
+    assert StateStore(paths.state).read().hosts["main"] == host
+
+
+def test_public_key_rejects_stale_sidecar_before_provisioning(tmp_path: Path) -> None:
+    from offbox.host import public_key
+
+    key = tmp_path / "identity"
+    key.write_text("private")
+    key.with_name("identity.pub").write_text("ssh-ed25519 WRONG stale")
+    runner = FakeRunner([Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 CORRECT\n")])
+    with pytest.raises(PreconditionError, match="does not match"):
+        public_key(runner, key)
+    assert runner.calls[0].argv == ["ssh-keygen", "-y", "-P", "", "-f", str(key)]
+
+
+def test_create_pins_host_and_persists_ready_default_then_destroy_cleans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.host.create import CreateOptions, create_host
+    from offbox.host.destroy import destroy_host
+    from offbox.state import StateStore
+
+    paths = paths_at(tmp_path)
+    key = tmp_path / "identity"
+    key.write_text("private")
+    key.with_name("identity.pub").write_text("ssh-ed25519 AAAA")
+
+    def generated_key(_runner: Runner, path: Path) -> tuple[str, str]:
+        path.write_text("PRIVATE HOST KEY")
+        path.with_name(path.name + ".pub").write_text("ssh-ed25519 BBBB")
+        return "PRIVATE HOST KEY", "ssh-ed25519 BBBB"
+
+    monkeypatch.setattr("offbox.host.create.generate_host_key", generated_key)
+    monkeypatch.setenv("HCLOUD_TOKEN", "synthetic-host-create-token")
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA"),
+            Script(prefix=["tofu", "init"]),
+            Script(prefix=["tofu", "apply"]),
+            Script(prefix=["tofu", "output"], stdout='{"ip":{"value":"192.0.2.1"},"ssh_user":{"value":"offbox"}}'),
+            Script(prefix=["ssh", "-o"], stdout=""),
+            Script(prefix=["ssh", "-O", "check"], returncode=1),
+            Script(prefix=["tofu", "destroy"]),
+        ]
+    )
+    host = create_host(
+        paths,
+        runner,
+        CreateOptions(ssh_key=key),
+        executable=Path("tofu"),
+        clock=FakeClock(),
+        probe=lambda _a, _p, _t: True,
+        ssh_config=tmp_path / "ssh/config",
+    )
+    assert host.phase == "ready"
+    assert host.address == "192.0.2.1"
+    assert StateStore(paths.state).read().default_host == "main"
+    assert host.known_hosts_path.read_text() == "offbox-main ssh-ed25519 BBBB\n"
+    assert "StrictHostKeyChecking yes" in (paths.config / "ssh_config").read_text()
+    assert not (host.known_hosts_path.parent / "ssh_host_ed25519_key").exists()
+    destroy_host(paths, runner, "main", executable=Path("tofu"))
+    assert StateStore(paths.state).read().hosts == {}
+    assert StateStore(paths.state).read().default_host is None
+    assert not (paths.state / "hosts/main").exists()
+    assert (paths.config / "ssh_config").read_text() == ""
+
+
+def test_none_driver_removes_only_offbox_resources_in_order() -> None:
+    from datetime import UTC, datetime
+
+    from offbox.drivers.none import NoneDriver
+    from offbox.state import HostState
+
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"], stdout="abcdef012345\n"),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], stdout="offbox-feature-docker\n"),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    host = HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        known_hosts_path=Path("known_hosts"),
+    )
+    NoneDriver(runner, host).destroy()
+    assert [call.argv[-1] for call in runner.calls] == [
+        "docker ps -aq --filter label=offbox.env",
+        "docker rm -f abcdef012345",
+        "docker volume ls -q --filter 'name=^offbox-'",
+        "docker volume rm offbox-feature-docker",
+        "docker network inspect offbox",
+        "docker network rm offbox",
+        "sudo -n rm -rf /srv/offbox /var/lib/offbox",
+    ]
+
+
+def test_existing_host_retry_updates_validated_identity(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from offbox.host.init import InitOptions, init_host
+    from offbox.state import HostState, State, StateStore
+
+    paths = paths_at(tmp_path)
+    directory = paths.state / "hosts/main"
+    directory.mkdir(parents=True)
+    known = directory / "known_hosts"
+    known.write_text("offbox-main ssh-ed25519 AAAA\n")
+    previous = HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        known_hosts_path=known,
+        phase="initializing",
+        ssh_key=tmp_path / "old-key",
+    )
+    StateStore(paths.state).write(State(hosts={"main": previous}))
+    key = tmp_path / "new-key"
+    key.write_text("private")
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-keyscan"], stdout="192.0.2.1 ssh-ed25519 AAAA\n"),
+            Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 BBBB"),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    host = init_host(
+        paths,
+        runner,
+        InitOptions(target="dev@192.0.2.1", ssh_key=key, accept_host_key=True),
+        ssh_config=tmp_path / "ssh/config",
+        clock=FakeClock(),
+        probe=lambda _a, _p, _t: True,
+    )
+    assert host.ssh_key == key
+    assert f'IdentityFile "{key}"' in (paths.config / "ssh_config").read_text()
+    assert StateStore(paths.state).read().hosts["main"].ssh_key == key
+
+
+def test_agent_only_identity_is_supported(tmp_path: Path) -> None:
+    from offbox.host import public_key
+
+    key = tmp_path / "hardware-key"
+    key.with_name(key.name + ".pub").write_text("ssh-ed25519 AAAA hardware")
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-keygen", "-y"], returncode=1),
+            Script(prefix=["ssh-keygen", "-lf"], stdout="256 SHA256:known hardware (ED25519)"),
+            Script(prefix=["ssh-add", "-l"], stdout="256 SHA256:known hardware (ED25519)"),
+        ]
+    )
+    assert public_key(runner, key) == "ssh-ed25519 AAAA hardware"
+
+
+def test_host_operation_refuses_concurrent_lifecycle(tmp_path: Path) -> None:
+    from offbox.host import host_operation
+
+    paths = paths_at(tmp_path)
+    with host_operation(paths, "main"), pytest.raises(PreconditionError, match="already running"), host_operation(paths, "main"):
+        pytest.fail("Two lifecycle operations must not hold the same host lock")
+
+
+def test_destroy_accepts_full_length_digit_started_env_names(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from offbox.host.destroy import destroy_host
+    from offbox.state import EnvState, HostState, State, StateStore
+
+    paths = paths_at(tmp_path)
+    workspace = paths.state / "hosts/main/tofu"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="custom"\ndescription="test"\ndriver="tofu"\n')
+    host = HostState(
+        name="main",
+        provider="custom",
+        address="",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+        phase="creating",
+    )
+    env_name = "1" + "a" * 31 + "-abcd"
+    env = EnvState(name=env_name, host="main", worktree_path=tmp_path / "repo", created_at=datetime.now(UTC))
+    StateStore(paths.state).write(State(hosts={"main": host}, envs={env_name: env}))
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "terminate"]), Script(prefix=["tofu", "destroy"])])
+    destroy_host(paths, runner, "main", executable=Path("tofu"))
+    assert [call.argv for call in runner.calls] == [
+        ["mutagen", "sync", "terminate", f"offbox-{env_name}"],
+        ["tofu", "destroy", "-auto-approve", "-input=false"],
+    ]
+    assert StateStore(paths.state).read().envs == {}
+
+
+def test_cli_missing_credential_is_actionable_exit_three(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    result = CliRunner().invoke(app, ["host", "create"])
+    assert result.exit_code == 3
+    assert "HCLOUD_TOKEN" in result.stderr
+    assert "Fix:" in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("name_arguments", [[], ["main"]])
+def test_host_ssh_separator_preserves_exact_remote_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name_arguments: list[str]
+) -> None:
+    from collections.abc import Mapping, Sequence
+    from datetime import UTC, datetime
+
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+    from offbox.runner import SubprocessRunner
+    from offbox.state import HostState, State, StateStore
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    paths = Paths.discover()
+    host = HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        known_hosts_path=tmp_path / "known_hosts",
+    )
+    StateStore(paths.state).write(State(hosts={"main": host}, default_host="main"))
+    calls: list[list[str]] = []
+
+    def stream(
+        _self: SubprocessRunner, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+    ) -> int:
+        calls.append(list(argv))
+        return 42
+
+    monkeypatch.setattr(SubprocessRunner, "stream", stream)
+    result = CliRunner().invoke(app, ["host", "ssh", *name_arguments, "--", "printf", "%s", "a; touch /tmp/unwanted"])
+    assert result.exit_code == 42
+    assert calls == [["ssh", "offbox-main", "--", "printf %s 'a; touch /tmp/unwanted'"]]

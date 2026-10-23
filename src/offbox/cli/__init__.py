@@ -7,6 +7,7 @@ from typer.core import TyperGroup
 from typer.exceptions import Abort, Exit
 
 from offbox import __version__, console
+from offbox.cli.host import app as host_app
 from offbox.doctor import diagnose
 from offbox.errors import OffboxError
 from offbox.logging import configure, redact
@@ -50,6 +51,7 @@ class ErrorGroup(TyperGroup):
 
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, cls=ErrorGroup)
+app.add_typer(host_app, name="host")
 
 
 def _version_callback(value: bool) -> None:

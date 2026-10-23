@@ -14,6 +14,7 @@ from offbox.errors import PreconditionError
 
 
 class HostState(Model):
+    phase: Literal["creating", "initializing", "ready"] = "ready"
     name: str
     provider: str
     address: str
