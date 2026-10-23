@@ -12,7 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from offbox import console
 from offbox.config import Model, SyncConfig
 from offbox.errors import CommandFailed, PreconditionError
-from offbox.naming import Worktree
+from offbox.naming import Worktree, validate_env_name
+from offbox.providers import validate_name
 from offbox.runner import Result, Runner
 from offbox.state import HostState
 
@@ -307,3 +308,47 @@ class SyncManager:
 
     def terminate(self, work: Worktree, host: HostState | None = None) -> None:
         self._cleanup("terminate", work, host)
+
+    def terminate_all(self) -> None:
+        try:
+            result = self._run(["mutagen", "sync", "list", "--label-selector", "offbox-env", "--template", "{{ json . }}"])
+        except PreconditionError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError) and shutil.which("mutagen") is None:
+                console.warn("Mutagen is not installed; continuing local cleanup without terminating sync sessions.")
+                return
+            raise
+        try:
+            sessions = TypeAdapter(list[SyncSession]).validate_json(result.stdout)
+        except ValidationError as exc:
+            raise PreconditionError("Invalid Mutagen session response", "Check mutagen sync list and retry uninstall.") from exc
+        owned: list[SyncSession] = []
+        for session in sessions:
+            name = session.labels.get("offbox-env")
+            if name is None or session.name != f"offbox-{name}":
+                continue
+            validate_env_name(name)
+            if session.beta.host is not None and session.beta.host.startswith("offbox-"):
+                validate_name(session.beta.host[len("offbox-") :])
+            if (
+                session.alpha.protocol != "local"
+                or not Path(session.alpha.path).is_absolute()
+                or session.beta.protocol != "ssh"
+                or not (session.beta.host or "").startswith("offbox-")
+                or session.beta.path != f"/srv/offbox/envs/{name}/work"
+                or session.alpha.user
+                or session.alpha.host
+                or session.alpha.port
+                or session.alpha.environment
+                or session.alpha.parameters
+                or session.beta.user
+                or session.beta.port
+                or session.beta.environment
+                or session.beta.parameters
+            ):
+                raise PreconditionError(
+                    f"Cannot verify ownership of sync session {session.identifier}",
+                    f"Inspect mutagen sync list; terminate {session.identifier} explicitly only if it belongs to offbox.",
+                )
+            owned.append(session)
+        for session in owned:
+            self._run(["mutagen", "sync", "terminate", session.identifier])

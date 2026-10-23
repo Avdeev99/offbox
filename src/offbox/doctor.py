@@ -55,7 +55,9 @@ def check_key(runner: Runner, key: Path, *, configured: bool = False) -> Check:
     )
 
 
-def diagnose(paths: Paths, runner: Runner, *, project_root: Path | None = None, tools: ToolDiscovery | None = None) -> DoctorReport:
+def diagnose(
+    paths: Paths, runner: Runner, *, project_root: Path | None = None, tools: ToolDiscovery | None = None, ssh_key: Path | None = None
+) -> DoctorReport:
     report = DoctorReport()
     discovery = tools or ToolDiscovery(runner, paths.cache)
     for name in ("ssh", "git", "mutagen", "tofu"):
@@ -128,6 +130,8 @@ def diagnose(paths: Paths, runner: Runner, *, project_root: Path | None = None, 
                 except OffboxError as exc:
                     report.checks.append(_failure("host", exc))
     try:
+        if ssh_key is not None:
+            key, configured_key = ssh_key, True
         report.checks.append(check_key(runner, key.expanduser(), configured=configured_key))
     except OffboxError as exc:
         report.checks.append(_failure("ssh-key", exc))

@@ -1,0 +1,273 @@
+{
+  "$defs": {
+    "PortForward": {
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "title": "Env",
+          "type": "string"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "remote": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Remote",
+          "type": "integer"
+        },
+        "local": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Local",
+          "type": "integer"
+        },
+        "ip": {
+          "anyOf": [
+            {
+              "format": "ipv4",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ip"
+        },
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "env",
+        "host",
+        "remote",
+        "local",
+        "ip",
+        "active"
+      ],
+      "title": "PortForward",
+      "type": "object"
+    },
+    "PortsReport": {
+      "additionalProperties": false,
+      "properties": {
+        "forwards": {
+          "items": {
+            "$ref": "#/$defs/PortForward"
+          },
+          "title": "Forwards",
+          "type": "array"
+        }
+      },
+      "title": "PortsReport",
+      "type": "object"
+    },
+    "StackService": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "health": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Health"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "title": "StackService",
+      "type": "object"
+    },
+    "StatusCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "ok",
+            "warning",
+            "error"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fix"
+        }
+      },
+      "required": [
+        "name",
+        "level",
+        "message"
+      ],
+      "title": "StatusCheck",
+      "type": "object"
+    },
+    "SyncHealth": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "disconnected",
+            "halted-on-root-emptied",
+            "halted-on-root-deletion",
+            "halted-on-root-type-change",
+            "connecting-alpha",
+            "connecting-beta",
+            "watching",
+            "scanning",
+            "waiting-for-rescan",
+            "reconciling",
+            "staging-alpha",
+            "staging-beta",
+            "transitioning",
+            "saving",
+            "unknown"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "paused": {
+          "title": "Paused",
+          "type": "boolean"
+        },
+        "conflicts": {
+          "title": "Conflicts",
+          "type": "integer"
+        },
+        "problems": {
+          "title": "Problems",
+          "type": "integer"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fix"
+        }
+      },
+      "required": [
+        "state",
+        "paused",
+        "conflicts",
+        "problems",
+        "ok"
+      ],
+      "title": "SyncHealth",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "env": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Env"
+    },
+    "host": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Host"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/StatusCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "ports": {
+      "$ref": "#/$defs/PortsReport"
+    },
+    "stack": {
+      "items": {
+        "$ref": "#/$defs/StackService"
+      },
+      "title": "Stack",
+      "type": "array"
+    },
+    "sync": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncHealth"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "StatusReport",
+  "type": "object"
+}
