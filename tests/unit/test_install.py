@@ -33,8 +33,7 @@ def test_changed_install_hash_runs_with_scoped_env_then_atomically_records_posti
     before, after = "a" * 64, "b" * 64
     runner = FakeRunner(
         [
-            Script(prefix=["ssh"], stdout=before + "  -\n"),
-            Script(prefix=["ssh"], stdout="missing\n"),
+            Script(prefix=["ssh"], stdout=before + "  -\nmissing\n"),
             Script(prefix=["ssh"], method="start_stream"),
             Script(prefix=["ssh"], stdout=after + "  -\n"),
             Script(prefix=["ssh"]),
@@ -44,11 +43,11 @@ def test_changed_install_hash_runs_with_scoped_env_then_atomically_records_posti
     executor.install(
         work, host, InstallConfig(command="npm ci", when=["package-lock.json", "nested/lock file"]), env={"NPM_TOKEN": "private"}
     )
-    assert len(runner.calls) == 5
+    assert len(runner.calls) == 4
     assert runner.calls[0].argv[-1].endswith("package-lock.json 'nested/lock file'")
-    assert "-e NPM_TOKEN=private" in runner.calls[2].argv[-1]
-    assert runner.calls[4].argv[-1].endswith(after)
-    assert runner.calls[4].input is not None and 'mv -f -- "$tmp" "$path/install.sha256"' in runner.calls[4].input
+    assert "-e NPM_TOKEN=private" in runner.calls[1].argv[-1]
+    assert runner.calls[3].argv[-1].endswith(after)
+    assert runner.calls[3].input is not None and 'mv -f -- "$tmp" "$path/install.sha256"' in runner.calls[3].input
     output = capsys.readouterr()
     assert output.out == ""
     assert "lockfile changed, running install" in output.err
@@ -56,10 +55,50 @@ def test_changed_install_hash_runs_with_scoped_env_then_atomically_records_posti
 
 def test_matching_hash_does_not_install_or_rewrite_marker(tmp_path: Path) -> None:
     executor, work, host = context(tmp_path)
-    runner = FakeRunner([Script(prefix=["ssh"], stdout="a" * 64 + "  -\n"), Script(prefix=["ssh"], stdout="a" * 64 + "\n")])
+    runner = FakeRunner([Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + "a" * 64 + "\n")])
     executor.runner = runner
     executor.install(work, host, InstallConfig(command="false", when=["lock"]))
-    assert [call.method for call in runner.calls] == ["run", "run"]
+    assert [call.method for call in runner.calls] == ["run"]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "",
+        "a" * 64 + "  -",
+        "not-a-hash\nmissing",
+        "A" * 64 + "  -\nmissing",
+        "a" * 64 + "  -\ninvalid-marker",
+        "a" * 64 + "  -\nmissing\nunexpected",
+        "a" * 64 + "  -\n" + "b" * 63,
+    ],
+)
+def test_invalid_combined_probe_stops_before_install_or_marker_write(tmp_path: Path, response: str) -> None:
+    executor, work, host = context(tmp_path)
+    runner = FakeRunner([Script(prefix=["ssh"], stdout=response)])
+    executor.runner = runner
+    with pytest.raises(PreconditionError):
+        executor.install(work, host, InstallConfig(command="npm ci"))
+    assert len(runner.calls) == 1
+    assert runner.calls[0].method == "run"
+
+
+def test_changed_existing_marker_triggers_install(tmp_path: Path) -> None:
+    executor, work, host = context(tmp_path)
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + "b" * 64),
+            Script(prefix=["ssh"], method="start_stream"),
+            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n"),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    executor.runner = runner
+    executor.install(work, host, InstallConfig(command="npm ci", when=["lock"]))
+    assert len(runner.calls) == 4
+    assert runner.calls[1].method == "start_stream"
+    assert "npm ci" in runner.calls[1].argv[-1]
+    assert runner.calls[-1].argv[-1].endswith("a" * 64)
 
 
 @pytest.mark.parametrize("status", [1, 42, 130, 143])
@@ -67,8 +106,7 @@ def test_failed_install_never_writes_marker_and_preserves_signal_status(tmp_path
     executor, work, host = context(tmp_path)
     runner = FakeRunner(
         [
-            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n"),
-            Script(prefix=["ssh"], stdout="missing\n"),
+            Script(prefix=["ssh"], stdout="a" * 64 + "  -\nmissing\n"),
             Script(prefix=["ssh"], method="start_stream", returncode=status),
         ]
     )
@@ -76,18 +114,16 @@ def test_failed_install_never_writes_marker_and_preserves_signal_status(tmp_path
     with pytest.raises(OffboxError) as caught:
         executor.install(work, host, InstallConfig(command="npm ci"))
     assert caught.value.exit_code == (status if status in (130, 143) else 1)
-    assert len(runner.calls) == 3
+    assert len(runner.calls) == 2
 
 
 def test_marker_read_io_error_stops_before_install(tmp_path: Path) -> None:
     executor, work, host = context(tmp_path)
-    runner = FakeRunner(
-        [Script(prefix=["ssh"], stdout="a" * 64 + "  -\n"), Script(prefix=["ssh"], returncode=3, stderr="Input/output error")]
-    )
+    runner = FakeRunner([Script(prefix=["ssh"], returncode=3, stderr="Input/output error")])
     executor.runner = runner
     with pytest.raises(CommandFailed, match="Input/output error"):
         executor.install(work, host, InstallConfig(command="npm ci"))
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 1
     script = runner.calls[-1].input or ""
     assert "export LC_ALL=C" in script
     assert "No such file or directory" in script and "Not a directory" in script
@@ -139,8 +175,7 @@ def test_up_stages_order_mise_install_stack_and_forwards_configured_env(tmp_path
     runner = FakeRunner(
         [
             Script(prefix=["ssh"], method="start_stream"),
-            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n"),
-            Script(prefix=["ssh"], stdout="a" * 64 + "\n"),
+            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + "a" * 64 + "\n"),
             Script(prefix=["ssh"], method="start_stream"),
             Script(prefix=["ssh"], stdout="b" * 64 + "  -\n"),
             Script(prefix=["ssh"]),

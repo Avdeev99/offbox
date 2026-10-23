@@ -16,6 +16,7 @@ from offbox.naming import Worktree, validate_env_name
 from offbox.providers import validate_name
 from offbox.runner import Result, Runner
 from offbox.state import HostState
+from offbox.timings import measured
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,7 @@ class SyncManager:
             )
         return session
 
+    @measured("Sync setup")
     def ensure(self, work: Worktree, host: HostState, config: SyncConfig) -> None:
         session = self.status(work, host)
         if session is None:
@@ -264,6 +266,7 @@ class SyncManager:
         if session.paused:
             self._run(["mutagen", "sync", "resume", session.identifier])
 
+    @measured("Sync flush")
     def flush(self, work: Worktree, host: HostState | None = None) -> None:
         session = self.status(work, host)
         if session is None:
@@ -303,9 +306,11 @@ class SyncManager:
                 return
             raise
 
+    @measured("Sync pause")
     def pause(self, work: Worktree, host: HostState | None = None) -> None:
         self._cleanup("pause", work, host)
 
+    @measured("Sync cleanup")
     def terminate(self, work: Worktree, host: HostState | None = None) -> None:
         self._cleanup("terminate", work, host)
 

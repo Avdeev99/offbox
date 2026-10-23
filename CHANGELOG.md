@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `--timings` summaries for provisioning, synchronization, setup, forwarding and command execution, without changing stdout or exit codes.
+- A real Hetzner benchmark of both sample applications, including timings, resource observations, billing estimates and verified cleanup.
+
+### Fixed
+
+- Cloud host creation refreshes early SSH connections and verifies Docker access before reporting readiness, so bootstrap's Docker-group changes take effect.
+- Execution combines dependency hash/marker reads and owned-container/Compose port discovery into fresh probes, removing two sequential SSH round trips without skipping checks.
+
 ## [0.1.0] - 2026-10-23
 
 PyPI publication and release tags are deferred. This version identifies the v0.1 source implementation.

@@ -8,6 +8,7 @@ from typing import Protocol
 from offbox.errors import ConnectionError_, OffboxError
 from offbox.runner import Runner
 from offbox.ssh import ssh_argv
+from offbox.timings import measured
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def tcp_probe(address: str, port: int, timeout: float) -> bool:
         return False
 
 
+@measured("Host readiness")
 def wait_ready(
     name: str,
     address: str,

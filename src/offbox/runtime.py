@@ -24,6 +24,7 @@ from offbox.runner import Result, Runner
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, StateStore
 from offbox.sync import SyncManager
+from offbox.timings import measured
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +323,7 @@ class Runtime:
             raise PreconditionError("Environment is not registered", "offbox up")
         return work, env, self._host(env.host)
 
+    @measured("Container operation")
     def mutate(
         self,
         host: HostState,
@@ -445,6 +447,7 @@ class Runtime:
         project_hash = hashlib.sha256(str(work.root).encode()).hexdigest()[:16]
         return f"offbox-local/{project_hash}:{local}"
 
+    @measured("Image build")
     def build_image(self, host: HostState, work: Worktree, dockerfile: str) -> BuiltImage:
         project_hash = hashlib.sha256(str(work.root).encode()).hexdigest()[:16]
         script = (
@@ -515,6 +518,7 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
             except OffboxError:
                 logger.exception("Cannot retrieve environment diagnostics")
 
+    @measured("Container readiness")
     def wait_ready(self, host: HostState, work: Worktree, container: ContainerInfo, *, timeout: float = 60) -> None:
         deadline = self.clock.now() + timeout
         while self.clock.now() < deadline:

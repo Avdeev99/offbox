@@ -1,0 +1,738 @@
+{
+  "date": "2026-10-23",
+  "units": "seconds unless specified",
+  "baseline": {
+    "commit": "51fbcea2ee4ea51a6fda92728d6804d940beceb5",
+    "patch": "Refresh bootstrap SSH connection and verify Docker before marking host ready",
+    "timings_feature": "Added after the cloud measurements; not part of this baseline"
+  },
+  "setup": {
+    "client_os": "macOS-15.7.3-arm64-arm-64bit",
+    "client_python": "3.12.7",
+    "terraform": "1.12.1",
+    "mutagen": "0.18.1",
+    "hcloud": ">=1.68,<1.69",
+    "vm": {
+      "type": "cpx32",
+      "region": "hel1",
+      "cpus": 4,
+      "memory_gb": 8,
+      "os": "Ubuntu 24.04",
+      "kernel": "6.8.0-138-generic",
+      "docker": "29.9.2"
+    },
+    "environment": {
+      "cpus": 1,
+      "memory": "2g"
+    },
+    "universal_image": "ghcr.io/avdeev99/offbox-universal@sha256:b8a57d964220ed595bc54fea2bc34327c97401a7b8df1aab9f129f25a88e68b1"
+  },
+  "latencies": {
+    "local-python-noop": {
+      "n": 10,
+      "median": 0.023488311999244615,
+      "p95_nearest_rank": 0.02712637500371784,
+      "minimum": 0.012405959016177803,
+      "maximum": 0.02712637500371784,
+      "samples": [
+        0.012405959016177803,
+        0.0191088339779526,
+        0.023157707997597754,
+        0.023818916000891477,
+        0.027091292024124414,
+        0.018816416966728866,
+        0.026372042018920183,
+        0.02712637500371784,
+        0.020532374968752265,
+        0.024338957970030606
+      ]
+    },
+    "local-offbox-version": {
+      "n": 10,
+      "median": 0.1354467915080022,
+      "p95_nearest_rank": 0.15997204201994464,
+      "minimum": 0.12370462500257418,
+      "maximum": 0.15997204201994464,
+      "samples": [
+        0.12370462500257418,
+        0.1288243340095505,
+        0.13167154102120548,
+        0.13601045799441636,
+        0.13488312502158806,
+        0.12805037503130734,
+        0.13754870800767094,
+        0.13742325000930578,
+        0.15997204201994464,
+        0.14152908395044506
+      ]
+    },
+    "ssh-cold-noop": {
+      "n": 3,
+      "median": 1.6459007919766009,
+      "p95_nearest_rank": 1.6491645419737324,
+      "minimum": 1.6403648339910433,
+      "maximum": 1.6491645419737324,
+      "samples": [
+        1.6459007919766009,
+        1.6491645419737324,
+        1.6403648339910433
+      ]
+    },
+    "ssh-warm-noop": {
+      "n": 10,
+      "median": 0.27248972898814827,
+      "p95_nearest_rank": 0.28664999996544793,
+      "minimum": 0.2624212499940768,
+      "maximum": 0.28664999996544793,
+      "samples": [
+        0.2685916660120711,
+        0.28206674999091774,
+        0.28664999996544793,
+        0.2624212499940768,
+        0.2717027079779655,
+        0.27350579103222117,
+        0.27327674999833107,
+        0.2749312910018489,
+        0.27010787499602884,
+        0.2671462500002235
+      ]
+    },
+    "python-exec-warm": {
+      "n": 10,
+      "median": 2.9281689374765847,
+      "p95_nearest_rank": 3.1697841670247726,
+      "minimum": 2.843646291003097,
+      "maximum": 3.1697841670247726,
+      "samples": [
+        2.921001749986317,
+        2.843646291003097,
+        2.861578125040978,
+        3.1697841670247726,
+        2.9703830829821527,
+        2.8852092919987626,
+        2.8834708749782294,
+        3.0867202499648556,
+        2.9353361249668524,
+        3.04895274998853
+      ]
+    },
+    "python-exec-nosync": {
+      "n": 10,
+      "median": 2.6122229165339377,
+      "p95_nearest_rank": 2.73353445797693,
+      "minimum": 2.572889250004664,
+      "maximum": 2.73353445797693,
+      "samples": [
+        2.5917027079849504,
+        2.572889250004664,
+        2.617071750049945,
+        2.73353445797693,
+        2.596389124984853,
+        2.6182724160025828,
+        2.6594509999849834,
+        2.6073740830179304,
+        2.6695002909982577,
+        2.605905124975834
+      ]
+    },
+    "python-http-warm": {
+      "n": 10,
+      "median": 0.2717879374686163,
+      "p95_nearest_rank": 0.28141954098828137,
+      "minimum": 0.26427229098044336,
+      "maximum": 0.28141954098828137,
+      "samples": [
+        0.26854308298788965,
+        0.26427229098044336,
+        0.27158012497238815,
+        0.2670687090139836,
+        0.28018816601252183,
+        0.28136199997970834,
+        0.2691252089571208,
+        0.27199574996484444,
+        0.2738424160052091,
+        0.28141954098828137
+      ]
+    },
+    "python-sync-small": {
+      "n": 5,
+      "median": 3.0334438330028206,
+      "p95_nearest_rank": 3.091369957954157,
+      "minimum": 2.911573417019099,
+      "maximum": 3.091369957954157,
+      "samples": [
+        2.9800382500397973,
+        2.911573417019099,
+        3.0477447499870323,
+        3.0334438330028206,
+        3.091369957954157
+      ]
+    },
+    "node-exec-warm": {
+      "n": 5,
+      "median": 2.8897388339973986,
+      "p95_nearest_rank": 2.904240083997138,
+      "minimum": 2.878704208007548,
+      "maximum": 2.904240083997138,
+      "samples": [
+        2.883619458996691,
+        2.8905572499497794,
+        2.904240083997138,
+        2.878704208007548,
+        2.8897388339973986
+      ]
+    },
+    "ssh-docker-exec-noop": {
+      "n": 10,
+      "median": 0.3790595004684292,
+      "p95_nearest_rank": 0.39398424996761605,
+      "minimum": 0.361390209000092,
+      "maximum": 0.39398424996761605,
+      "samples": [
+        0.37961391697172076,
+        0.3785050839651376,
+        0.38170533400261775,
+        0.3881149580120109,
+        0.38867141696391627,
+        0.37522183399414644,
+        0.361390209000092,
+        0.39398424996761605,
+        0.37723454198567197,
+        0.3781815830152482
+      ]
+    },
+    "python-edit-to-http": {
+      "n": 3,
+      "median": 3.0329551696777344,
+      "p95_nearest_rank": 3.2205402851104736,
+      "minimum": 2.5006110668182373,
+      "maximum": 3.2205402851104736,
+      "samples": [
+        3.0329551696777344,
+        2.5006110668182373,
+        3.2205402851104736
+      ]
+    },
+    "python-edit-restore-to-http": {
+      "n": 3,
+      "median": 3.198636054992676,
+      "p95_nearest_rank": 3.2938711643218994,
+      "minimum": 2.369218111038208,
+      "maximum": 3.2938711643218994,
+      "samples": [
+        3.198636054992676,
+        2.369218111038208,
+        3.2938711643218994
+      ]
+    }
+  },
+  "warm_exec_phases": {
+    "SyncManager.flush": {
+      "n": 10,
+      "median": 0.3158829379826784,
+      "p95_nearest_rank": 0.32699912501266226,
+      "minimum": 0.2941242080414668,
+      "maximum": 0.32699912501266226,
+      "samples": [
+        0.3261440829955973,
+        0.31442379200598225,
+        0.3095095839817077,
+        0.3205973750445992,
+        0.31413554097525775,
+        0.31271937501151115,
+        0.3173420839593746,
+        0.32699912501266226,
+        0.2941242080414668,
+        0.32187362504191697
+      ]
+    },
+    "Executor.install": {
+      "n": 10,
+      "median": 0.8414603124838322,
+      "p95_nearest_rank": 0.8783827919978648,
+      "minimum": 0.8187934160232544,
+      "maximum": 0.8783827919978648,
+      "samples": [
+        0.8196717090322636,
+        0.8273746250197291,
+        0.8187934160232544,
+        0.8567997500067577,
+        0.8783827919978648,
+        0.8290839589899406,
+        0.850714957981836,
+        0.8538161659962498,
+        0.8523223330266774,
+        0.8322056669858284
+      ]
+    },
+    "PortManager.restore": {
+      "n": 10,
+      "median": 0.8362943750107661,
+      "p95_nearest_rank": 1.059763874975033,
+      "minimum": 0.7730328750330955,
+      "maximum": 1.059763874975033,
+      "samples": [
+        0.8737379999947734,
+        0.7730328750330955,
+        0.8314831670140848,
+        1.059763874975033,
+        0.8411055830074474,
+        0.7839731249841861,
+        0.8051913329982199,
+        0.8158321660012007,
+        0.8565669999807142,
+        0.9492594170151278
+      ]
+    },
+    "Executor.run": {
+      "n": 10,
+      "median": 0.4340395419858396,
+      "p95_nearest_rank": 0.4972452080110088,
+      "minimum": 0.3853209580411203,
+      "maximum": 0.4972452080110088,
+      "samples": [
+        0.3853209580411203,
+        0.4326059589511715,
+        0.38853616698179394,
+        0.4354731250205077,
+        0.44166775001212955,
+        0.43738966702949256,
+        0.3871260000159964,
+        0.4972452080110088,
+        0.42912658298155293,
+        0.43942875001812354
+      ]
+    }
+  },
+  "single_operations": {
+    "host-create": {
+      "seconds": 101.83518433297286,
+      "returncode": 0
+    },
+    "python-up-cold": {
+      "seconds": 43.58533679199172,
+      "returncode": 0
+    },
+    "node-up-image-warm": {
+      "seconds": 50.113680624985136,
+      "returncode": 0
+    },
+    "python-api-tests": {
+      "seconds": 6.386447582975961,
+      "returncode": 0
+    },
+    "node-browser-tests": {
+      "seconds": 6.110960624995641,
+      "returncode": 0
+    },
+    "node-production-build": {
+      "seconds": 3.362102417042479,
+      "returncode": 0
+    },
+    "python-sync-10mib": {
+      "seconds": 5.782750667014625,
+      "returncode": 0
+    },
+    "python-remote-write-and-local-sync-roundtrip": {
+      "seconds": 3.313582041999325,
+      "returncode": null
+    },
+    "python-stop": {
+      "seconds": 1.3168077919981442,
+      "returncode": 0
+    },
+    "python-resume": {
+      "seconds": 16.440957584010903,
+      "returncode": 0
+    },
+    "python-fresh": {
+      "seconds": 44.201897859573364,
+      "returncode": 0
+    },
+    "python-persistence-verified": {
+      "seconds": 3.570589780807495,
+      "returncode": 0
+    },
+    "python-tests-after-resume": {
+      "seconds": 3.941567897796631,
+      "returncode": 0
+    },
+    "python-database-reset-verified": {
+      "seconds": 3.4784798622131348,
+      "returncode": 0
+    },
+    "python-source-survived-fresh": {
+      "seconds": 2.884006977081299,
+      "returncode": 0
+    },
+    "python-tests-after-hot-reload": {
+      "seconds": 4.440350770950317,
+      "returncode": 0
+    },
+    "node-stop": {
+      "seconds": 1.2909412500448525,
+      "returncode": 0
+    },
+    "node-resume": {
+      "seconds": 14.791019375028554,
+      "returncode": 0
+    },
+    "node-browser-tests-after-resume": {
+      "seconds": 5.949327915965114,
+      "returncode": 0
+    },
+    "python-exit-42": {
+      "seconds": 2.9309279918670654,
+      "returncode": 42
+    },
+    "python-exit-255": {
+      "seconds": 3.2869198322296143,
+      "returncode": 255
+    },
+    "python-status": {
+      "seconds": 6.185491791984532,
+      "returncode": 0
+    },
+    "node-status": {
+      "seconds": 6.300017875037156,
+      "returncode": 0
+    },
+    "python-remove": {
+      "seconds": 1.997058291977737,
+      "returncode": 0
+    },
+    "node-remove": {
+      "seconds": 1.799805250018835,
+      "returncode": 0
+    },
+    "host-destroy": {
+      "seconds": 18.303181250055786,
+      "returncode": 0
+    },
+    "cleanup-verified": {
+      "seconds": 24.012422500003595,
+      "returncode": null
+    }
+  },
+  "environment_stages": {
+    "python-up-cold": [
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 0.4901453339844011
+      },
+      {
+        "stage": "SyncManager.ensure",
+        "command": null,
+        "seconds": 5.418903334008064
+      },
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 1.9779369999887422
+      },
+      {
+        "stage": "Runtime.wait_ready",
+        "command": null,
+        "seconds": 2.104886416986119
+      },
+      {
+        "stage": "SyncManager.flush",
+        "command": null,
+        "seconds": 0.33456129202386364
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "uv sync --frozen",
+        "seconds": 1.4071850840118714
+      },
+      {
+        "stage": "Executor.install",
+        "command": null,
+        "seconds": 3.1136191250407137
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "docker compose up -d --build --wait",
+        "seconds": 28.167192749970127
+      },
+      {
+        "stage": "PortManager.restore",
+        "command": null,
+        "seconds": 0.8098522499785759
+      }
+    ],
+    "node-up-image-warm": [
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 0.483756625035312
+      },
+      {
+        "stage": "SyncManager.ensure",
+        "command": null,
+        "seconds": 0.7200837080017664
+      },
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 1.719505874963943
+      },
+      {
+        "stage": "Runtime.wait_ready",
+        "command": null,
+        "seconds": 2.1813096670084633
+      },
+      {
+        "stage": "SyncManager.flush",
+        "command": null,
+        "seconds": 0.31966629199450836
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "npm ci && npx playwright install chromium",
+        "seconds": 26.671271458035335
+      },
+      {
+        "stage": "Executor.install",
+        "command": null,
+        "seconds": 28.35701749997679
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "docker compose up -d --wait",
+        "seconds": 14.323047292011324
+      },
+      {
+        "stage": "PortManager.restore",
+        "command": null,
+        "seconds": 0.8847477080416866
+      }
+    ],
+    "python-resume": [
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 0.6025064580026083
+      },
+      {
+        "stage": "SyncManager.ensure",
+        "command": null,
+        "seconds": 0.7048240000149235
+      },
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 0.9023929170216434
+      },
+      {
+        "stage": "Runtime.wait_ready",
+        "command": null,
+        "seconds": 2.1448152079829015
+      },
+      {
+        "stage": "SyncManager.flush",
+        "command": null,
+        "seconds": 0.3223295829957351
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "uv sync --frozen",
+        "seconds": 0.4286471250234172
+      },
+      {
+        "stage": "Executor.install",
+        "command": null,
+        "seconds": 2.1289250000263564
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "docker compose up -d --build --wait",
+        "seconds": 7.605496375006624
+      },
+      {
+        "stage": "PortManager.restore",
+        "command": null,
+        "seconds": 0.8471962919575162
+      }
+    ],
+    "python-fresh": [
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 0.6239707500208169
+      },
+      {
+        "stage": "SyncManager.ensure",
+        "command": null,
+        "seconds": 0.02588866703445092
+      },
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 2.6125592080061324
+      },
+      {
+        "stage": "Runtime.wait_ready",
+        "command": null,
+        "seconds": 2.165313082979992
+      },
+      {
+        "stage": "SyncManager.ensure",
+        "command": null,
+        "seconds": 0.7323901670170017
+      },
+      {
+        "stage": "SyncManager.flush",
+        "command": null,
+        "seconds": 0.4156155830132775
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "uv sync --frozen",
+        "seconds": 0.6046065000118688
+      },
+      {
+        "stage": "Executor.install",
+        "command": null,
+        "seconds": 2.311650292016566
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "docker compose up -d --build --wait",
+        "seconds": 33.04080504103331
+      },
+      {
+        "stage": "PortManager.restore",
+        "command": null,
+        "seconds": 0.8115882499841973
+      }
+    ],
+    "node-resume": [
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 0.6001489170012064
+      },
+      {
+        "stage": "SyncManager.ensure",
+        "command": null,
+        "seconds": 0.717184790992178
+      },
+      {
+        "stage": "Runtime.mutate",
+        "command": null,
+        "seconds": 0.9111553329857998
+      },
+      {
+        "stage": "Runtime.wait_ready",
+        "command": null,
+        "seconds": 2.1130850829649717
+      },
+      {
+        "stage": "SyncManager.flush",
+        "command": null,
+        "seconds": 0.33086641697445884
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "npm ci && npx playwright install chromium",
+        "seconds": 3.127199082984589
+      },
+      {
+        "stage": "Executor.install",
+        "command": null,
+        "seconds": 4.810976459004451
+      },
+      {
+        "stage": "Executor._stage",
+        "command": "docker compose up -d --wait",
+        "seconds": 3.375619333004579
+      },
+      {
+        "stage": "PortManager.restore",
+        "command": null,
+        "seconds": 0.8255419160122983
+      }
+    ]
+  },
+  "provisioning_subprocesses": [
+    {
+      "command": "--version",
+      "seconds": 0.1365213330136612
+    },
+    {
+      "command": "init -input=false",
+      "seconds": 1.7194018749869429
+    },
+    {
+      "command": "apply -auto-approve -input=false",
+      "seconds": 14.351190457993653
+    },
+    {
+      "command": "output -json",
+      "seconds": 0.14156845898833126
+    }
+  ],
+  "resources": {
+    "samples": 152,
+    "sampling_interval_seconds": 3,
+    "max_host_memory_total_minus_available": 1348136960,
+    "min_host_memory_available": 6773805056,
+    "min_disk_available": 146288627712,
+    "max_simultaneous_environments": 2,
+    "environment_peaks": {
+      "python": {
+        "sampled_memory_bytes": 292342988.8,
+        "sampled_cpu_percent": 105.08
+      },
+      "node": {
+        "sampled_memory_bytes": 399822028.8,
+        "sampled_cpu_percent": 104.58
+      }
+    },
+    "final_outer_containers_oom_killed": false
+  },
+  "first_attempt": {
+    "result": "Docker access failed due stale SSH supplementary groups; fixed before second attempt",
+    "setup_seconds": 111.45480945898453,
+    "teardown_seconds": 18.315198874974158,
+    "cleanup_verified": true
+  },
+  "cleanup": {
+    "before": {
+      "servers": [],
+      "primary_ips": [],
+      "firewalls": [],
+      "volumes": [],
+      "floating_ips": [],
+      "ssh_keys": []
+    },
+    "after": {
+      "servers": [],
+      "primary_ips": [],
+      "firewalls": [],
+      "volumes": [],
+      "floating_ips": [],
+      "ssh_keys": []
+    }
+  },
+  "billing": {
+    "currency": "USD",
+    "vm_per_hour": 0.0673,
+    "ipv4_per_hour": 0.001,
+    "billed_hour_estimate_per_attempt": 1,
+    "attempts": 2,
+    "estimated_total": 0.1366,
+    "status": "Estimate, not an invoice. Each short-lived VM and IPv4 rounds to one hour.",
+    "overall_elapsed_seconds": 863.8572931289673
+  },
+  "exclusions": [
+    "An initial custom persistence probe used an import path only configured for pytest. It failed in the harness, then was corrected and all persistence/fresh checks passed. Its failed duration is not used in latency distributions.",
+    "No OOM stress, load, throughput, US-region comparison or production-size repository benchmark.",
+    "End-to-end CLI samples include Python startup and temporary instrumentation. Stage timings exclude CLI startup; inclusive nested stages must not be added together.",
+    "Hot reload includes sync, reload and HTTP observation. It is not pure Mutagen transfer time.",
+    "Initial universal image download happened during VM bootstrap; first app startup uses that host image cache.",
+    "Sample sizes are small; nearest-rank p95 is the largest sample for n <= 10. Resource snapshots can miss short peaks."
+  ]
+}

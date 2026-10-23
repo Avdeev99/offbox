@@ -1,3 +1,5 @@
+import hashlib
+import json
 import logging
 import os
 import sys
@@ -11,9 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from offbox import console
 from offbox.config import Model
 from offbox.errors import OffboxError, PreconditionError
+from offbox.execute import INSTALL_PROBE_SCRIPT
 from offbox.host.ready import SystemClock
 from offbox.naming import Worktree, worktree_name
 from offbox.paths import Paths
+from offbox.ports import PORT_DISCOVERY_SCRIPT, PortSnapshot
 from offbox.runner import Result, SubprocessRunner
 from offbox.ssh import ensure_include, known_host, ssh_argv, sync_config, write_private
 from offbox.state import HostState, State, StateStore
@@ -93,6 +97,68 @@ class Smoke:
 
     def write_report(self) -> None:
         (self.artifacts / "report.json").write_text(self.report.model_dump_json(indent=2) + "\n")
+
+    def batched_probe_guards(self) -> None:
+        directory = self.root / "probe-guards"
+        work = directory / "work"
+        work.mkdir(parents=True)
+        lock = work / "lock"
+        lock.write_text("lock contents\n")
+        digest = hashlib.sha256(f"{hashlib.sha256(lock.read_bytes()).hexdigest()}  lock\n".encode()).hexdigest()
+        command = ["sh", "-s", "--", str(work), str(directory), "lock"]
+        result = self.run_command(command, input=INSTALL_PROBE_SCRIPT)
+        require(
+            result.stdout.splitlines() == [digest + "  -", "missing"], "Combined install probe changed its hash/missing-marker contract"
+        )
+        metadata = directory / ".offbox"
+        metadata.mkdir()
+        marker = metadata / "install.sha256"
+        marker.write_text(digest + "\n")
+        result = self.run_command(command, input=INSTALL_PROBE_SCRIPT)
+        require(result.stdout.splitlines() == [digest + "  -", digest], "Combined install probe lost the existing marker")
+        lock.unlink()
+        lock.symlink_to(marker)
+        self.run_command(command, input=INSTALL_PROBE_SCRIPT, expected=3)
+        lock.unlink()
+        lock.write_text("lock contents\n")
+        marker.unlink()
+        marker.symlink_to(lock)
+        self.run_command(command, input=INSTALL_PROBE_SCRIPT, expected=3)
+        require(lock.read_text() == "lock contents\n", "A refused probe changed its symlink target")
+        bin_dir = directory / "bin"
+        bin_dir.mkdir()
+        write_private(
+            bin_dir / "docker",
+            '#!/bin/sh\nset -eu\ncase "$1" in\n'
+            "container) printf '%s\\n' \"$OFFBOX_PROBE_INSPECTION\" ;;\n"
+            "exec) touch \"$OFFBOX_PROBE_EXECUTED\"; printf '[]\\n' ;;\n"
+            "*) exit 9 ;;\nesac\n",
+        )
+        (bin_dir / "docker").chmod(0o700)
+        for name, running, label in (("owned", True, "probe-abcd"), ("unowned", True, "other-abcd"), ("stopped", False, "probe-abcd")):
+            executed = directory / f"executed-{name}"
+            inspection = [
+                {
+                    "Name": "/offbox-probe-abcd",
+                    "State": {"Running": running},
+                    "Config": {"Labels": {"offbox.env": label, "offbox.worktree": str(work)}},
+                    "NetworkSettings": {"Networks": {"offbox": {"IPAddress": "10.89.0.2"}}},
+                }
+            ]
+            result = self.runner.run(
+                ["sh", "-s", "--", "probe-abcd", str(work), "offbox-probe-abcd"],
+                input=PORT_DISCOVERY_SCRIPT,
+                env={
+                    "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+                    "OFFBOX_PROBE_INSPECTION": json.dumps(inspection),
+                    "OFFBOX_PROBE_EXECUTED": str(executed),
+                },
+                timeout=10,
+            )
+            snapshot = PortSnapshot.model_validate_json(result.stdout)
+            require(executed.exists() == (name == "owned"), "Port discovery queried Compose before validating ownership/running state")
+            require(snapshot.compose == ("[]" if name == "owned" else ""), "Port discovery returned unexpected Compose output")
+        self.complete("Batched probes preserve hash/marker contracts, refuse symlinks, and guard ownership before Compose execution")
 
     def prepare(self) -> None:
         self.root.mkdir()
@@ -328,6 +394,7 @@ def main() -> int:
     smoke = Smoke()
     try:
         smoke.prepare()
+        smoke.batched_probe_guards()
         smoke.synchronization_and_execution()
         smoke.signals()
         smoke.forwarding_and_lifecycle()

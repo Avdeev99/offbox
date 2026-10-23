@@ -33,6 +33,8 @@ Mutagen owns one validated session per environment. Synchronization is two-way-s
 
 `exec` flushes sync unless explicitly disabled, checks the declared dependency-file hash under a per-environment client lock, and runs through SSH and `offbox-run`. Arguments remain an argv list; declared install/stack strings are explicitly shell commands. Non-TTY stdin is closed unless requested. Output streams stay live and Offbox's own diagnostics use stderr.
 
+The dependency hash and existing install marker are read in one SSH probe under that installation lock; post-install rehash and atomic marker writes remain separate. Automatic forwarding reads a fresh container/Compose snapshot in one probe, validates the expected running container's ownership before querying Compose, and validates the response locally before changing mappings. These probes reduce round trips without caching ownership, hashes, IP addresses or discovered ports across commands.
+
 The execution shim records command identity, process-group metadata and final status outside `/work`. This allows Offbox to distinguish a remote exit 255 from an SSH failure and to relay SIGINT/SIGTERM to the remote process group with a bounded cleanup deadline. TTY execution uses terminal signal handling. See [agent contracts](agents.md).
 
 ## Forwarding, state and diagnostics
