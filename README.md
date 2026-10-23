@@ -72,6 +72,7 @@ An `offbox.toml` at the Git worktree root configures resources, dependency insta
 - [FastAPI + Postgres](examples/python-compose/): real database-backed API and tests, with ports 8000 and 5432.
 - [Vite + Playwright](examples/node-playwright/): a small web app and browser test, with port 3000.
 - [Agent instructions and JSON contracts](docs/agents.md).
+- [Architecture and lifecycle](docs/architecture.md).
 - [Providers](docs/providers.md), [writing a provider](docs/writing-a-provider.md), and [troubleshooting](docs/troubleshooting.md).
 
 ## Related tools

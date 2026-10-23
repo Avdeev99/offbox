@@ -14,7 +14,7 @@ PyPI publication and release tags are deferred. This version identifies the v0.1
 
 - Hetzner/OpenTofu provisioning and existing-SSH host initialization with pinned SSH host keys and recoverable local provider state.
 - Per-worktree privileged environments with separate Docker daemons, resource limits, persistent data, ownership checks and garbage collection.
-- Public universal amd64 image with pinned development tools, Docker Compose, browsers and execution/readiness shims.
+- Public universal amd64 image with pinned development tools, Docker Compose, browser dependencies and execution/readiness shims.
 - Two-way-safe Mutagen synchronization, mandatory Git exclusion, dependency-file hashing and explicit project setup commands.
 - Streaming command execution with scoped environment variables, stdin/TTY modes, preserved exit codes and bounded signal cleanup.
 - Stable loopback port allocation, SSH forward restoration and port swaps across environments.

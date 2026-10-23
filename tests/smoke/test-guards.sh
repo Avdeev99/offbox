@@ -31,6 +31,14 @@ printf 'sudo %s\n' "$*" >> "$SMOKE_GUARD_CALLS"
 [ "$#" -eq 4 ] && [ "$1" = rm ] && [ "$2" = -rf ] && [ "$3" = -- ] && [ "$4" = "${SMOKE_GUARD_ALLOWED_KEYS:?}" ] || exit 9
 exec /bin/rm -rf -- "$4"
 STUB
+cat > "$scratch/bin/stat" <<'STUB'
+#!/bin/sh
+[ "$1" = --format=%F ] && [ "$2" = -- ] || exit 9
+if [ "${SMOKE_GUARD_STAT_SYMLINK:-0}" = 1 ]; then printf 'symbolic link\n'; exit 0; fi
+if [ "${SMOKE_GUARD_STAT_FAIL:-0}" = 1 ]; then printf 'stat: Input/output error\n' >&2; exit 1; fi
+printf 'stat: %s: No such file or directory\n' "$3" >&2
+exit 1
+STUB
 chmod +x "$scratch/bin/"*
 
 expect_status() {
@@ -86,4 +94,12 @@ printf '{invalid-json' > "$workspace/artifacts/manifest.json"
 expect_status 1 "$script_dir/run.sh" cleanup guard-owned
 printf '{"envs": []}\n' > "$workspace/artifacts/manifest.json"
 expect_status 0 "$script_dir/run.sh" cleanup guard-owned
-printf '%s\n' 'Smoke ownership/symlink/deletion/inventory guards passed without Docker.'
+printf '{"envs": [{"name": "missing-abcd", "root": "/tmp/offbox-smoke-guard-owned/worktrees/first"}]}\n' > "$workspace/artifacts/manifest.json"
+expect_status 0 "$script_dir/run.sh" cleanup guard-owned
+expect_status 0 "$script_dir/run.sh" cleanup guard-owned
+export SMOKE_GUARD_STAT_FAIL=1
+expect_status 1 "$script_dir/run.sh" cleanup guard-owned
+export SMOKE_GUARD_STAT_FAIL=0
+export SMOKE_GUARD_STAT_SYMLINK=1
+expect_status 1 "$script_dir/run.sh" cleanup guard-owned
+printf '%s\n' 'Smoke ownership/symlink/deletion/inventory/idempotency guards passed without Docker.'

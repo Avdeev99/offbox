@@ -21,7 +21,7 @@ srv_owned() {
 }
 
 cleanup() {
-    local failed=0 root name resource owned inventory entries owned_workspace=false
+    local failed=0 root name resource owned inventory entries kind owned_workspace=false
     if [[ -e "$task_dir" || -L "$task_dir" ]]; then
         if workspace_owned; then
             owned_workspace=true
@@ -61,7 +61,15 @@ cleanup() {
                 else
                     failed=1
                 fi
-                if srv_owned; then sudo rm -rf -- "/srv/offbox/envs/$name" || failed=1; else failed=1; fi
+                if kind=$(LC_ALL=C stat --format=%F -- "/srv/offbox/envs/$name" 2>&1); then
+                    if [[ "$kind" == directory ]] && srv_owned; then
+                        sudo rm -rf -- "/srv/offbox/envs/$name" || failed=1
+                    else
+                        failed=1
+                    fi
+                else
+                    case "$kind" in *': No such file or directory'|*': Not a directory') ;; *) printf '%s\n' "$kind" >&2; failed=1 ;; esac
+                fi
             done <<< "$entries"
         fi
     fi
