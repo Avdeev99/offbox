@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "offbox"
+dynamic = ["version"]
+description = "Give every git worktree its own Docker stack on one cloud VM."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "typer>=0.27,<0.28",
+    "pydantic>=2",
+    "rich",
+    "jinja2",
+]
+
+[project.urls]
+Repository = "https://github.com/Avdeev99/offbox"
+Issues = "https://github.com/Avdeev99/offbox/issues"
+
+[project.scripts]
+offbox = "offbox.cli:app"
+
+[dependency-groups]
+dev = ["pytest", "pytest-xdist", "ruff", "mypy", "pyright"]
+
+[tool.hatch.version]
+path = "src/offbox/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/offbox"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"host" = "offbox/_data/host"
+"images" = "offbox/_data/images"
+"providers" = "offbox/_data/providers"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src", "/tests", "/host", "/images", "/providers",
+    "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE",
+    "/CONTRIBUTING.md", "/CHANGELOG.md", "/AGENTS.md", "/Makefile",
+    "/.pre-commit-config.yaml", "/RTK.md",
+]
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+extend-select = ["I", "T20", "PGH003", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/offbox/console.py" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers -n auto"
+markers = [
+    "subprocess: spawns real processes (ssh, docker, mutagen); not in the default unit run",
+]

@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/offbox
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.0"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --frozen
+      - run: make check
+      - run: make test
+      - name: Validate version and extract changelog
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test "$(uv run --frozen offbox --version)" = "$version"
+          awk -v version="$version" '
+            index($0, "## [" version "]") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+            END { if (!found) exit 1 }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          test -s "$RUNNER_TEMP/release-notes.md"
+      - run: uv build
+      - name: Smoke test the wheel
+        shell: bash
+        run: |
+          test "$(uv run --isolated --no-project --with dist/offbox-*.whl offbox --version)" = "${GITHUB_REF_NAME#v}"
+      - run: uv publish --trusted-publishing always
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "offbox $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"

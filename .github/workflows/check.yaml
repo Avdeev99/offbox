@@ -1,0 +1,40 @@
+name: Check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.0"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - run: make check
+      - run: uv build
+      - name: Smoke test the wheel
+        shell: bash
+        run: |
+          test "$(uv run --isolated --no-project --with dist/offbox-*.whl offbox --version)" = "$(uv run --frozen offbox --version)"
+      - name: ShellCheck
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          mapfile -d '' shell_files < <(git ls-files -z -- '*.sh' 'images/universal/offbox-init' 'images/universal/offbox-run')
+          if ((${#shell_files[@]})); then
+            shellcheck "${shell_files[@]}"
+          else
+            echo 'No shell scripts yet; host and image scripts arrive in milestones 2 and 3.'
+          fi
