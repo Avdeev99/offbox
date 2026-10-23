@@ -84,24 +84,21 @@ region = "fsn1"
 image = "ubuntu-24.04"
 ssh_key = "~/.ssh/id_ed25519"
 
-[hosts.home]
-provider = "ssh"
-address = "192.0.2.10"
-port = 22
-ssh_key = "~/.ssh/id_ed25519"
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `default_host` | Unset | Fallback when state has no active host. `host use NAME` changes state and takes precedence. |
-| `hosts` | `{}` | Named preset tables. Explicit command flags take precedence over preset values. |
+| `hosts` | `{}` | Named preset tables. `host create` flags take precedence over its preset values. |
 | `hosts.NAME.provider` | `"hetzner"` | Built-in/custom provider name. |
 | `hosts.NAME.size` | Provider default | Cloud machine size; Hetzner currently defaults to `ccx33`. |
 | `hosts.NAME.region` | Provider default | Cloud location; Hetzner currently defaults to `fsn1`. |
 | `hosts.NAME.image` | Provider default | Cloud operating-system image, distinct from `env.image`; Hetzner defaults to `ubuntu-24.04`. |
-| `hosts.NAME.address` | Unset | Existing SSH target address. |
-| `hosts.NAME.port` | `22` | Existing SSH port. |
-| `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519` | Local private-key path. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
+| `hosts.NAME.address` | Unset | Accepted existing-host address field; `host init` requires its target explicitly and does not read this preset. |
+| `hosts.NAME.port` | `22` | Accepted existing-host port field; pass `--port` explicitly to `host init` when different from 22. |
+| `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519` | Local private-key path used by `host create`. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
+
+`host init` does not load host presets. Pass `USER@ADDRESS`, any nondefault `--port`, and `--ssh-key` explicitly, for example `offbox host init dev@192.0.2.10 --name home --port 2222 --ssh-key ~/.ssh/home --accept-host-key`.
 
 A registered environment always uses its recorded host. Changing the default does not move it. Remove that environment before selecting another host with `up --host NAME`.
 

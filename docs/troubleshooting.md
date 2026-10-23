@@ -284,6 +284,7 @@ Do not terminate an unrelated local service just because it holds a preferred po
 
 `logs --stack [SERVICE]` reads Compose output without running setup. Noninteractive setup needs an explicit provider/action. Uninstall removes local runtime records; it does not delete remote hosts or stop their billing. Destroy hosts first when you want them gone, and preserve custom providers and credentials under the configuration directory.
 
+- `Fix: Run offbox status and check host connectivity.`
 - `Fix: Check log permissions and encoding.`
 - `Fix: Inspect offbox list and the container labels.`
 - `Fix: Pass a Compose service name after --stack.`
