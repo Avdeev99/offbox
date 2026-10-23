@@ -73,12 +73,12 @@ def test_exact_create_command() -> None:
         "--default-file-mode-beta=0644",
         "--default-directory-mode-beta=0755",
     ]
-    for pattern in (*(pattern for pattern in DEFAULT_IGNORES if pattern != ".git"), "data/", "*.log", ".git"):
+    for pattern in (*(pattern for pattern in DEFAULT_IGNORES if pattern != ".git"), "data/", "*.log", "node_modules", ".git"):
         expected.extend(["--ignore", pattern])
     expected.extend(["/src/app", "offbox-main:/srv/offbox/envs/app-abcd/work"])
     assert create_command(work, host, SyncConfig(ignore=["data/", "*.log", "node_modules"])) == expected
     runner = FakeRunner([listing(), Script(prefix=["mutagen", "sync", "create"])])
-    SyncManager(runner).ensure(work, host, SyncConfig(ignore=["data/", "*.log"]))
+    SyncManager(runner).ensure(work, host, SyncConfig(ignore=["data/", "*.log", "node_modules"]))
     assert runner.calls[0].argv == ["mutagen", "sync", "list", "--label-selector", "offbox-env=app-abcd", "--template", "{{ json . }}"]
     assert runner.calls[1].argv == expected
 
@@ -254,6 +254,18 @@ def test_invalid_ignore_is_refused_before_session_creation(pattern: str) -> None
     with pytest.raises(PreconditionError, match="Invalid sync ignore"):
         SyncManager(runner).ensure(work, host, SyncConfig(ignore=[pattern]))
     assert [call.argv[2] for call in runner.calls] == ["list"]
+
+
+@pytest.mark.parametrize("patterns", [[".env", "!.env", ".env"], ["!node_modules", "node_modules"]])
+def test_project_ignore_override_order_survives_repeated_patterns(patterns: list[str]) -> None:
+    from offbox.sync import ignores
+
+    work, host = work_and_host()
+    config = SyncConfig(ignore=patterns)
+    assert ignores(config)[-len(patterns) - 1 :] == [*patterns, ".git"]
+    argv = create_command(work, host, config)
+    emitted = [argv[index + 1] for index, value in enumerate(argv) if value == "--ignore"]
+    assert emitted[-len(patterns) - 1 :] == [*patterns, ".git"]
 
 
 def test_linked_git_file_ignore_cannot_be_overridden_by_project_negation_or_deduplication() -> None:

@@ -66,7 +66,7 @@ A custom Dockerfile image is cached by project-path and Dockerfile-content hashe
 
 ### Sync and environment variables
 
-Default ignores cover dependency/cache/build directories: `node_modules`, `.venv`, `venv`, `__pycache__`, `*.pyc`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `dist`, `build`, `.next`, `.nuxt`, `target`, `.terraform`, `.DS_Store`, and mandatory `.git`. Offbox also enables VCS-directory ignoring. Linked worktrees' regular `.git` files are excluded too, including when project patterns use negation. Offbox sessions ignore unrelated global Mutagen defaults.
+Default ignores cover dependency/cache/build directories: `node_modules`, `.venv`, `venv`, `__pycache__`, `*.pyc`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `dist`, `build`, `.next`, `.nuxt`, `target`, `.terraform`, `.DS_Store`, and mandatory `.git`. Project patterns retain their order and repetitions so later patterns can override earlier ones. Mandatory `.git` is moved to the end once. Offbox also enables VCS-directory ignoring. Linked worktrees' regular `.git` files are excluded too, including when project patterns use negation. Offbox sessions ignore unrelated global Mutagen defaults.
 
 `.gitignore` is not a secret filter. Add `.env` or other sensitive paths explicitly to `sync.ignore` when they must stay local. Files created remotely, such as lockfiles and formatter output, sync back under two-way-safe conflict handling.
 

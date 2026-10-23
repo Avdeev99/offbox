@@ -3,7 +3,7 @@ name: Docker smoke
 on:
   pull_request:
   push:
-    branches: [master, "codex/**"]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
