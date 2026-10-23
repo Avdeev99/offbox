@@ -32,7 +32,7 @@ uvx pre-commit run --all-files
 
 Read [AGENTS.md](AGENTS.md) for code rules. Use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`), one PR per milestone, targeting `master`. Include the milestone's acceptance criteria as a checked list with command-output evidence in each PR. Run `make check` and `make test` before pushing. Never commit secrets. Tests never need real credentials or billable cloud resources.
 
-The repository keeps host scripts, image files and provider definitions at the root. Hatch force-includes them in wheels under `offbox/_data/host`, `offbox/_data/images` and `offbox/_data/providers`; runtime code must use `importlib.resources` to locate them. Their product implementations arrive in later milestones.
+The repository keeps host scripts, image files and provider definitions at the root. Hatch force-includes them in wheels under `offbox/_data/host`, `offbox/_data/images` and `offbox/_data/providers`; runtime code must use `importlib.resources` to locate them. The universal image is built separately from the Python wheel.
 
 ## One-time PyPI setup before v0.0.1
 
@@ -63,4 +63,15 @@ For later releases, manage the publisher under the existing PyPI project's Publi
 5. The workflow checks the tag against the package version, extracts that version's changelog section, builds and smoke-tests the wheel, then runs `uv publish --trusted-publishing always`. It creates the GitHub release using the same changelog section and attaches the distributions.
 6. Verify `uvx --refresh offbox --version` prints the released version and inspect the release on PyPI and GitHub.
 
-Release publication requires the maintainer's PyPI account setup; building and testing locally does not publish anything. The universal-image workflow and one-time public GHCR setup arrive in milestone 3.
+Release publication requires the maintainer's PyPI account setup; building and testing locally does not publish anything. See the GHCR setup below before the first universal-image publication.
+
+
+## Universal image and one-time GHCR setup
+
+The image workflow builds `linux/amd64` from `images/universal/Dockerfile`. Pull requests build without pushing. Changes to the image, its workflow or the package image constant on `master` publish the compatibility tag from `DEFAULT_IMAGE` and `sha-<short commit>`. Release tags also publish the corresponding semantic version. The workflow reads the repository name and compatibility tag from the package constant, so an image default changes in one place.
+
+After the first successful publication, open the repository's linked `offbox-universal` package on GitHub, choose **Package settings → Change visibility → Public**, and confirm the change. This is a one-time maintainer action; hosts need anonymous pull access. Ensure the package is linked to this repository and its Actions access allows this repository to write. The workflow uses only `GITHUB_TOKEN` with `packages: write`; no cloud credential or registry password is needed. See [GitHub's package visibility instructions](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+
+Image compatibility series `1` is distinct from the CLI release number. The CLI `v0.1.0` release publishes image aliases `:0.1.0` and `:1.0.0` in addition to the compatibility and commit tags, as recorded in the implementation issue's version clarification.
+
+Each successful build writes the actual compressed OCI image size to its Actions summary and an `image-size` artifact. Copy that measured result into the milestone PR; the target is below 3 GB. The report sums the compressed layer and configuration descriptors for the amd64 image and excludes attestations. Build/static checks do not prove nested Docker, browser or signal behavior at runtime. See [the image build guide](docs/universal-image.md) for contents and process contracts.

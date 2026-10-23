@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+
+fail() {
+    printf 'offbox: %s\n  Fix: Check the privileged container settings and dockerd log.\n' "$1" >&2
+    if [ -f /var/log/dockerd.log ]; then
+        tail -n 40 /var/log/dockerd.log >&2
+    fi
+    exit 1
+}
+
+install -d -m 0755 /etc/docker /run/offbox
+install -d -m 0700 -o dev -g dev /run/offbox/exec
+rm -f /run/offbox/ready /var/run/docker.pid
+cat > /etc/docker/daemon.json <<'JSON'
+{"data-root":"/var/lib/docker","storage-driver":"overlay2","bip":"172.31.0.1/24","default-address-pools":[{"base":"172.30.0.0/16","size":24}],"log-driver":"local"}
+JSON
+
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    mkdir -p /sys/fs/cgroup/init || fail 'Cannot create the nested cgroup.'
+    processes=$(cat /sys/fs/cgroup/cgroup.procs)
+    for pid in $processes; do
+        if ! printf '%s\n' "$pid" > /sys/fs/cgroup/init/cgroup.procs; then
+            [ ! -e "/proc/$pid" ] || fail 'Cannot move processes into the nested cgroup.'
+        fi
+    done
+    controllers=$(cat /sys/fs/cgroup/cgroup.controllers)
+    for controller in $controllers; do
+        case "$controller" in
+            cpu|memory|pids|io)
+                printf '+%s\n' "$controller" > /sys/fs/cgroup/cgroup.subtree_control || fail 'Cannot enable nested cgroup controllers.'
+                ;;
+        esac
+    done
+fi
+
+dockerd --host=unix:///var/run/docker.sock > /var/log/dockerd.log 2>&1 &
+daemon_pid=$!
+deadline=$(($(date +%s) + 60))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+    kill -0 "$daemon_pid" 2>/dev/null || fail 'The nested Docker daemon exited during startup.'
+    if [ -S /var/run/docker.sock ] && timeout 1 docker --host=unix:///var/run/docker.sock info >/dev/null 2>&1; then
+        touch /run/offbox/ready
+        exec sleep infinity
+    fi
+    sleep 1
+done
+fail 'The nested Docker daemon was not ready within 60 seconds.'
