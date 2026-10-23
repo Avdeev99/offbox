@@ -2,14 +2,55 @@ import json
 import logging
 import os
 import re
+import uuid
 from collections.abc import Mapping, Sequence
-from datetime import date, timedelta
+from contextvars import ContextVar
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from offbox.config import Model
 from offbox.paths import Paths
 
 _registered_secrets: set[str] = set()
 _SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY)$", re.IGNORECASE)
+_invocation: ContextVar[str] = ContextVar("offbox_invocation", default="")
+_environment: ContextVar[str | None] = ContextVar("offbox_environment", default=None)
+
+
+class LogEntry(Model):
+    timestamp: datetime
+    invocation: str
+    env: str | None
+    level: str
+    logger: str
+    message: str
+
+
+def bind_environment(name: str) -> None:
+    _environment.set(name)
+    logging.getLogger(__name__).debug("worktree context established")
+
+
+def close_logs() -> None:
+    root = logging.getLogger("offbox")
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+        handler.close()
+
+
+class StructuredFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        if record.exc_info:
+            message += "\n" + self.formatException(record.exc_info)
+        return LogEntry(
+            timestamp=datetime.fromtimestamp(record.created, UTC),
+            invocation=_invocation.get(),
+            env=_environment.get(),
+            level=record.levelname,
+            logger=record.name,
+            message=redact(message),
+        ).model_dump_json()
 
 
 def register_secrets(env: Mapping[str, str]) -> None:
@@ -71,11 +112,11 @@ def configure(paths: Paths, argv: Sequence[str], day: date | None = None) -> Pat
     target = paths.log_file(current)
     handler = logging.FileHandler(target, encoding="utf-8")
     target.chmod(0o600)
-    handler.setFormatter(RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    handler.setFormatter(StructuredFormatter())
     root = logging.getLogger("offbox")
-    for previous in root.handlers[:]:
-        root.removeHandler(previous)
-        previous.close()
+    close_logs()
+    _invocation.set(uuid.uuid4().hex)
+    _environment.set(None)
     root.setLevel(logging.DEBUG)
     root.addHandler(handler)
     root.propagate = False

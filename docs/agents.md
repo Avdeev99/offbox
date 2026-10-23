@@ -36,3 +36,35 @@ The host computes the hash in `[install].when` order. Each line is the lowercase
 One nonblocking local lock per environment coordinates hash checking, installation and marker updates from this laptop. Another installation for that environment fails with a retry instruction; other worktrees remain independent. The lock is released before the requested command starts. Coordination across multiple source laptops is outside the supported single-client workflow.
 
 `offbox --help` lists the currently implemented commands.
+
+## Environment status
+
+`offbox status --json` emits `StatusReport` and exits 3 if any check has `level: "error"`, otherwise 0. Warnings do not fail the command. Host connection failures are reported inside the JSON and also exit 3. Dependent probes are omitted when the host or environment cannot be checked. Unexpected software failures retain the ordinary CLI error contract.
+
+```json
+{
+  "env": "project-abcd",
+  "host": "main",
+  "checks": [
+    {"name": "host", "level": "ok", "message": "Host main reachable, offbox 0.0.1", "fix": null},
+    {"name": "disk", "level": "warning", "message": "Host disk 80% used", "fix": "Run offbox gc or offbox rm in unused worktrees."}
+  ],
+  "ports": {"forwards": []},
+  "stack": [],
+  "sync": null
+}
+```
+
+The serialized top-level fields are `env` and `host` (strings or null), `checks`, `ports`, `stack` and `sync`. Each check has `name`, `level` (`ok`, `warning`, `error`), `message` and `fix` (null only for success). Port entries have `env`, `host`, `remote`, `local`, `ip` and `active`. Stack entries have `name`, `state` and nullable `health`. A populated sync record has `state`, `paused`, `conflicts`, `problems`, `last_error`, `ok` and `fix`. The versioned contract is enforced by the JSON schema snapshot in `tests/fixtures/status-schema.json`.
+
+Status checks host reachability/version, disk, live running memory limits, container ownership/readiness, sync health, image updates, restored port forwards and Compose health. Disk usage warns at 80% and fails at 95%. A stopped inner Docker daemon fails readiness even if its old ready file remains. Running environment memory limits exceeding host RAM, or an unlimited environment, produce a warning.
+
+The image advisory reads registry metadata through `docker manifest inspect --verbose` and compares the Linux amd64 image **config digest** with the running container's Docker image ID. It never pulls image layers. Registry/authentication/unsupported-manifest failures are explicit warnings, not a claim that the image is current. Custom Dockerfiles use the configured synchronized Dockerfile hash and local image cache; unsynchronized changes or a missing build produce a warning with a recovery instruction. Status restores port forwards but does not flush source, install dependencies or start a stack.
+
+## Logs and first-run cleanup
+
+`offbox logs` writes today's attributed records for the current git worktree to stdout. Records are JSON lines with `timestamp`, `invocation`, `env`, `level`, `logger` and `message`. The invocation ID associates startup records with the environment resolved later in that invocation. Multiline messages remain one escaped JSON record; secrets are redacted before serialization. Older records without environment metadata cannot be attributed safely and are omitted. `--follow` follows additions and the daily date change. `offbox logs --stack [SERVICE] [--follow]` streams Compose logs directly, without sync or install hooks.
+
+`offbox setup` prompts only with terminal stdin. Every answer has an equivalent flag: `--provider`, `--action`, `--target`, `--name`, `--ssh-key`, `--size`, `--region`, `--port`, and `--accept-host-key`. Noninteractive checks can use `offbox setup --provider ssh --action check`. Provisioning requires explicit `--action create` or an affirmative interactive choice; it can create a billable VM. `--action init` bootstraps an existing server.
+
+`offbox uninstall` terminates verified owned Mutagen sessions, closes owned SSH masters and removes local state/cache/logs/control resources plus the exact generated SSH Include and configuration. It preserves user config, credentials, custom providers, SSH keys and remote hosts. If hosts remain, it lists them and requires explicit `--yes`; use `offbox host destroy NAME` first when you intend to remove those hosts. Uninstalling with `--yes` retains remote hosts while deleting their local provisioning state.

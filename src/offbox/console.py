@@ -15,6 +15,11 @@ def output(value: str) -> None:
     print(value)
 
 
+def text(value: str) -> None:
+    sys.stdout.write(value)
+    sys.stdout.flush()
+
+
 def version(value: str) -> None:
     output(value)
 

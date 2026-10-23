@@ -211,3 +211,21 @@ def test_doctor_outside_git_uses_current_directory(tmp_path: Path, monkeypatch: 
     paths = _paths(tmp_path)
     report = diagnose(paths, runner, tools=ToolDiscovery(runner, paths.cache, lookup=lambda name: name))
     assert next(check for check in report.checks if check.name == "project-config").ok is True
+
+
+def test_explicit_setup_key_is_checked_instead_of_missing_default_key(tmp_path: Path) -> None:
+    key = tmp_path / "explicit-identity"
+    key.write_text("synthetic private key")
+    paths = _paths(tmp_path)
+    runner = FakeRunner(
+        [
+            *_tool_scripts(),
+            Script(prefix=["ssh-add", "-l"], returncode=1),
+            Script(prefix=["ssh-keygen", "-y", "-P", "", "-f", str(key)], stdout="ssh-ed25519 AAAA"),
+        ]
+    )
+    report = diagnose(paths, runner, project_root=tmp_path, tools=ToolDiscovery(runner, paths.cache, lookup=lambda name: name), ssh_key=key)
+    assert report.ok
+    assert report.checks[-1].name == "ssh-key"
+    assert report.checks[-1].message == "SSH key is usable without a prompt"
+    assert runner.scripts == []

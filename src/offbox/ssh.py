@@ -78,9 +78,31 @@ def _quote(value: Path) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
 
 
+def include_line(paths: Paths) -> str:
+    return f"Include {_quote(paths.config / 'ssh_config')}"
+
+
+def remove_include(paths: Paths, config: Path | None = None) -> None:
+    target = config or Path.home() / ".ssh/config"
+    try:
+        previous = target.read_bytes()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise PreconditionError(f"Cannot read SSH configuration {target}", "Check SSH configuration permissions.") from exc
+    owned = include_line(paths).encode()
+    remaining = b"".join(line for line in previous.splitlines(keepends=True) if line.rstrip(b"\r\n") != owned)
+    if remaining != previous:
+        try:
+            content = remaining.decode("utf-8")
+        except UnicodeError as exc:
+            raise PreconditionError(f"Cannot read SSH configuration {target}", "Correct its UTF-8 encoding.") from exc
+        write_private(target, content)
+
+
 def ensure_include(paths: Paths, config: Path | None = None) -> None:
     target = config or Path.home() / ".ssh/config"
-    include = f"Include {_quote(paths.config / 'ssh_config')}"
+    include = include_line(paths)
     try:
         previous = target.read_text(encoding="utf-8") if target.exists() else ""
     except (OSError, UnicodeError) as exc:

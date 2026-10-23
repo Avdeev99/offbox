@@ -1,0 +1,100 @@
+[
+	{
+		"Ref": "ghcr.io/avdeev99/offbox-universal:1@sha256:b39a9ceba71e4055894020c60f8563ee84c3a47d4b5debc063f4c2aacae30444",
+		"Descriptor": {
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"digest": "sha256:b39a9ceba71e4055894020c60f8563ee84c3a47d4b5debc063f4c2aacae30444",
+			"size": 1629,
+			"platform": {
+				"architecture": "amd64",
+				"os": "linux"
+			}
+		},
+		"Raw": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1NjphZTFiYmMyZDUxMjIxYzUzMGQ1ZWZiZDY2YzE3ZmEzYzdkNWM3OGQ2NzMyZGE1NGZjMTZlNDMwOWY3Y2JjMGRlIiwKICAgICJzaXplIjogMTM1NTQKICB9LAogICJsYXllcnMiOiBbCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OmYyYjRlZjA2ZmYwMWE2N2Q0YmVkNzY1N2E0YWUzNzlhN2QwNzkzNGI3YzNlNzQzNDU0YTIyYTBkNTI3NWZiMmIiLAogICAgICAic2l6ZSI6IDI5NzY1NzU4CiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo3M2QwNThmZmExYzk1NGY4ZWZjZGIzYTJhZmVmMDEyMTMyZTU5NWVjMjI2ZTc1MDMxMDM0YjI2ZGQxOTA2Y2JkIiwKICAgICAgInNpemUiOiA0NjA5NDkwMjUKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OmVmNDlkYThmOWZjMjc0NGUwMDYyNTY5NzczYjQ1MzQzNDNlNDAxZWI2MzY0NjA3MzRmMDExNzkwMjkyN2E2NDAiLAogICAgICAic2l6ZSI6IDMxMjcxNTQxNwogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6NDZhNWYyYWI3YmU0ZTZkZDliMDFiNWFhYzFhYzBlZTNjZDcyOTc1ZmM5ZmVmMDY5ZGUyNGMwY2QxZjlmOGY5MiIsCiAgICAgICJzaXplIjogMjc2ODc4NjkyCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo0ZjRiZGQxYTM1YWQ0NzFjODM4NjE3MmM1YTNiMDMyYzZiNmJhMmQxNjViZmMzMTkxYzc3MThiNmY2YjI3YWRhIiwKICAgICAgInNpemUiOiAyNDgxCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1NjphN2VlYTZlNjY0YWJiNGY5YWI3MjVmNjFhNWYxYzFkMjNiYzk0Y2JkOGU2NjcyNTZkMTFhZDc5NGE4MzQ1YTE2IiwKICAgICAgInNpemUiOiAzOTMKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OjRmNGZiNzAwZWY1NDQ2MWNmYTAyNTcxYWUwZGI5YTBkYzFlMGNkYjU1Nzc0ODRhNmQ3NWU2OGRjMzhlOGFjYzEiLAogICAgICAic2l6ZSI6IDMyCiAgICB9CiAgXQp9",
+		"OCIManifest": {
+			"schemaVersion": 2,
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"config": {
+				"mediaType": "application/vnd.oci.image.config.v1+json",
+				"digest": "sha256:ae1bbc2d51221c530d5efbd66c17fa3c7d5c78d6732da54fc16e4309f7cbc0de",
+				"size": 13554
+			},
+			"layers": [
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:f2b4ef06ff01a67d4bed7657a4ae379a7d07934b7c3e743454a22a0d5275fb2b",
+					"size": 29765758
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:73d058ffa1c954f8efcdb3a2afef012132e595ec226e75031034b26dd1906cbd",
+					"size": 460949025
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:ef49da8f9fc2744e0062569773b4534343e401eb636460734f0117902927a640",
+					"size": 312715417
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:46a5f2ab7be4e6dd9b01b5aac1ac0ee3cd72975fc9fef069de24c0cd1f9f8f92",
+					"size": 276878692
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4f4bdd1a35ad471c8386172c5a3b032c6b6ba2d165bfc3191c7718b6f6b27ada",
+					"size": 2481
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:a7eea6e664abb4f9ab725f61a5f1c1d23bc94cbd8e667256d11ad794a8345a16",
+					"size": 393
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+					"size": 32
+				}
+			]
+		}
+	},
+	{
+		"Ref": "ghcr.io/avdeev99/offbox-universal:1@sha256:3d171f5a1bcc4e92da0aaa0a56a092015c75014e3b7523ac333006fadc5f3eba",
+		"Descriptor": {
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"digest": "sha256:3d171f5a1bcc4e92da0aaa0a56a092015c75014e3b7523ac333006fadc5f3eba",
+			"size": 838,
+			"platform": {
+				"architecture": "unknown",
+				"os": "unknown"
+			}
+		},
+		"Raw": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImFydGlmYWN0VHlwZSI6ICJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmF0dGVzdGF0aW9uLm1hbmlmZXN0LnYxK2pzb24iLAogICJjb25maWciOiB7CiAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuZW1wdHkudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1Njo0NDEzNmZhMzU1YjM2NzhhMTE0NmFkMTZmN2U4NjQ5ZTk0ZmI0ZmMyMWZlNzdlODMxMGMwNjBmNjFjYWFmZjhhIiwKICAgICJzaXplIjogMiwKICAgICJkYXRhIjogImUzMD0iCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5pbi10b3RvK2pzb24iLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo0Zjc3OWRhMTU3ZjAwMzNkNWYyYzY3ZWU4NmI3YmIzODFjNGUyOGMxNTA5YTc1NzZhMTYxMjQ1Zjk4MTI1YWE0IiwKICAgICAgInNpemUiOiA0MDE1MiwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJpbi10b3RvLmlvL3ByZWRpY2F0ZS10eXBlIjogImh0dHBzOi8vc2xzYS5kZXYvcHJvdmVuYW5jZS92MSIKICAgICAgfQogICAgfQogIF0sCiAgInN1YmplY3QiOiB7CiAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1NjpiMzlhOWNlYmE3MWU0MDU1ODk0MDIwYzYwZjg1NjNlZTg0YzNhNDdkNGI1ZGViYzA2M2Y0YzJhYWNhZTMwNDQ0IiwKICAgICJzaXplIjogMTYyOQogIH0KfQ==",
+		"OCIManifest": {
+			"schemaVersion": 2,
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"artifactType": "application/vnd.docker.attestation.manifest.v1+json",
+			"config": {
+				"mediaType": "application/vnd.oci.empty.v1+json",
+				"digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+				"size": 2,
+				"data": "e30="
+			},
+			"layers": [
+				{
+					"mediaType": "application/vnd.in-toto+json",
+					"digest": "sha256:4f779da157f0033d5f2c67ee86b7bb381c4e28c1509a7576a161245f98125aa4",
+					"size": 40152,
+					"annotations": {
+						"in-toto.io/predicate-type": "https://slsa.dev/provenance/v1"
+					}
+				}
+			],
+			"subject": {
+				"mediaType": "application/vnd.oci.image.manifest.v1+json",
+				"digest": "sha256:b39a9ceba71e4055894020c60f8563ee84c3a47d4b5debc063f4c2aacae30444",
+				"size": 1629
+			}
+		}
+	}
+]

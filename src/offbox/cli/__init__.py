@@ -10,6 +10,7 @@ from offbox import __version__, console
 from offbox.cli.env import register as register_env_commands
 from offbox.cli.exec import register as register_exec_command
 from offbox.cli.host import app as host_app
+from offbox.cli.misc import register as register_misc_commands
 from offbox.cli.ports import register as register_ports_command
 from offbox.doctor import diagnose
 from offbox.errors import OffboxError
@@ -59,6 +60,7 @@ app.add_typer(host_app, name="host")
 register_env_commands(app)
 register_exec_command(app)
 register_ports_command(app)
+register_misc_commands(app)
 
 
 def _version_callback(value: bool) -> None:

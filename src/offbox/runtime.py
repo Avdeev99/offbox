@@ -429,6 +429,22 @@ class Runtime:
             raise PreconditionError("Cannot inspect Dockerfile", "Check Dockerfile permissions and retry.") from exc
         return relative.as_posix()
 
+    def custom_image_tag(self, host: HostState, work: Worktree, dockerfile: str) -> str:
+        from offbox.execute import Executor
+
+        digest = Executor(self.paths, self.runner).install_hash(work, host, [dockerfile])
+        try:
+            local = hashlib.sha256((work.root / dockerfile).read_bytes()).hexdigest()
+        except OSError as exc:
+            raise PreconditionError("Cannot read the configured Dockerfile", "Check its permissions and run offbox up.") from exc
+        expected = hashlib.sha256(f"{local}  {dockerfile}\n".encode()).hexdigest()
+        if digest != expected:
+            raise PreconditionError(
+                "Configured Dockerfile changes are not synchronized", "Run offbox up --fresh after source sync completes."
+            )
+        project_hash = hashlib.sha256(str(work.root).encode()).hexdigest()[:16]
+        return f"offbox-local/{project_hash}:{local}"
+
     def build_image(self, host: HostState, work: Worktree, dockerfile: str) -> BuiltImage:
         project_hash = hashlib.sha256(str(work.root).encode()).hexdigest()[:16]
         script = (

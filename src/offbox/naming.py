@@ -7,6 +7,7 @@ from pydantic import field_validator
 
 from offbox.config import Model
 from offbox.errors import PreconditionError
+from offbox.logging import bind_environment
 from offbox.runner import Runner
 
 
@@ -61,4 +62,6 @@ def find_worktree(runner: Runner, cwd: Path | None = None) -> Worktree:
     if result.returncode or not root or not Path(root).is_absolute():
         raise PreconditionError("Not inside a git worktree", "cd into a git worktree")
     absolute = Path(os.path.abspath(root))
-    return Worktree(root=absolute, name=worktree_name(absolute))
+    work = Worktree(root=absolute, name=worktree_name(absolute))
+    bind_environment(work.name)
+    return work
