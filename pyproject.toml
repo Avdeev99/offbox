@@ -32,6 +32,7 @@ path = "src/offbox/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/offbox"]
+exclude = ["/src/offbox/_data/**"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "host" = "offbox/_data/host"
@@ -39,8 +40,12 @@ packages = ["src/offbox"]
 "providers" = "offbox/_data/providers"
 
 [tool.hatch.build.targets.sdist]
+exclude = [
+    "**/node_modules/**", "**/.venv/**", "**/dist/**",
+    "**/playwright-report/**", "**/test-results/**",
+]
 include = [
-    "/src", "/tests", "/host", "/images", "/providers",
+    "/src", "/tests", "/host", "/images", "/providers", "/docs", "/examples",
     "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE",
     "/CONTRIBUTING.md", "/CHANGELOG.md", "/AGENTS.md", "/Makefile",
     "/.pre-commit-config.yaml", "/RTK.md",

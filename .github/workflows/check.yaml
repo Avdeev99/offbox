@@ -23,6 +23,8 @@ jobs:
       - run: uv sync --frozen
       - run: make check
       - run: uv build
+      - name: Build a wheel directly from the checkout
+        run: uv build --wheel
       - name: Smoke test the wheel
         shell: bash
         run: |

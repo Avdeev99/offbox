@@ -211,7 +211,15 @@ class SubprocessRunner:
                 completed = self._run_logged(argv, values, cwd, timeout)
             else:
                 completed = subprocess.run(
-                    list(argv), capture_output=capture, input=input, env=values, cwd=cwd, timeout=timeout, text=True, check=False
+                    list(argv),
+                    capture_output=capture,
+                    input=input,
+                    stdin=subprocess.DEVNULL if input is None else None,
+                    env=values,
+                    cwd=cwd,
+                    timeout=timeout,
+                    text=True,
+                    check=False,
                 )
         except subprocess.TimeoutExpired as exc:
             logger.error("command timeout duration=%.3f", time.monotonic() - start)

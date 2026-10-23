@@ -107,3 +107,35 @@ def test_launch_error_and_empty_argv(monkeypatch: pytest.MonkeyPatch) -> None:
         SubprocessRunner().stream(["missing"])
     with pytest.raises(PreconditionError, match="Empty command"):
         SubprocessRunner().run([])
+
+
+@pytest.mark.parametrize("input", [None, "explicit script input"])
+def test_administrative_commands_do_not_inherit_user_stdin(monkeypatch: pytest.MonkeyPatch, input: str | None) -> None:
+    seen: list[tuple[object, object]] = []
+
+    def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append((kwargs.get("stdin"), kwargs.get("input")))
+        return subprocess.CompletedProcess(list(argv), 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    SubprocessRunner().run(["ssh", "host", "inspect"], input=input)
+    assert seen == [(subprocess.DEVNULL if input is None else None, input)]
+
+
+@pytest.mark.subprocess
+def test_administrative_read_cannot_consume_a_later_user_stream() -> None:
+    import sys
+
+    script = """from offbox.runner import SubprocessRunner
+runner = SubprocessRunner()
+runner.run(['cat'])
+process = runner.start_stream(['cat'], stdin=True)
+status = process.wait(timeout=2)
+if status is None:
+    process.kill()
+    raise SystemExit(1)
+raise SystemExit(status)
+"""
+    result = SubprocessRunner().run([sys.executable, "-c", script], input="user payload\n", timeout=5)
+    assert result.stdout == "user payload\n"
+    assert result.stderr == ""

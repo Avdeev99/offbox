@@ -11,7 +11,8 @@ fail() {
 
 install -d -m 0755 /etc/docker /run/offbox
 install -d -m 0700 -o dev -g dev /run/offbox/exec
-rm -f /run/offbox/ready /var/run/docker.pid
+rm -f /run/offbox/ready /var/run/docker.pid /var/run/docker.sock
+rm -rf /var/run/docker
 cat > /etc/docker/daemon.json <<'JSON'
 {"data-root":"/var/lib/docker","storage-driver":"overlay2","bip":"172.31.0.1/24","default-address-pools":[{"base":"172.30.0.0/16","size":24}],"log-driver":"local"}
 JSON

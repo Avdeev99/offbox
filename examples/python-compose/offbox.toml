@@ -1,0 +1,14 @@
+[env]
+cpus = 1
+memory = "2g"
+
+[install]
+command = "uv sync --frozen"
+when = ["uv.lock"]
+
+[stack]
+up = "docker compose up -d --build --wait"
+
+[ports]
+forward = [8000, 5432]
+auto = true
