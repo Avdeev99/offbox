@@ -566,7 +566,7 @@ class Smoke:
         require(self.local_port(first) == ports[0], "stop/up changed the stable local mapping")
         self.cli(first, "exec", "--", "docker", "volume", "inspect", "smoke-data-marker")
         self.response(ports[0], "alpha\n")
-        self.cli(first, "up", "--fresh", timeout=600)
+        self.cli(first, "up", "--fresh", "--yes", timeout=600)
         require(self.cli(first, "exec", "--", "cat", "note.txt").stdout == "updated\n", "fresh removed synced code")
         self.cli(first, "exec", "--", "docker", "volume", "inspect", "smoke-data-marker", expected=1)
         self.response(self.local_port(first), "alpha\n")
