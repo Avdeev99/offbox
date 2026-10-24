@@ -11,6 +11,7 @@ from offbox.logging import configure
 from offbox.paths import Paths
 from offbox.ssh import include_line, remove_include
 from offbox.state import HostState, State, StateStore
+from offbox.tools import mutagen_directory
 from offbox.uninstall import uninstall
 
 
@@ -378,3 +379,42 @@ def test_uninstall_cli_passes_the_abandon_flag(tmp_path: Path, monkeypatch: pyte
     result = CliRunner().invoke(app, ["uninstall", "--yes", "--abandon-cloud-hosts"])
     assert result.exit_code == 0
     assert seen == [(True, True)]
+
+
+def test_uninstall_stops_the_downloaded_mutagen_daemon_before_removing_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    directory = mutagen_directory(paths.cache)
+    directory.mkdir(parents=True)
+    (directory / "mutagen").write_text("binary")
+    (directory / "mutagen-agents.tar.gz").write_text("agents")
+
+    def missing(_name: str) -> str | None:
+        return None
+
+    monkeypatch.setattr("offbox.uninstall.shutil.which", missing)
+    runner = FakeRunner(
+        [
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(prefix=[str(directory / "mutagen"), "sync", "list"], stdout="[]"),
+            Script(prefix=[str(directory / "mutagen"), "daemon", "stop"]),
+        ]
+    )
+    uninstall(paths, runner, yes=True, ssh_config=ssh_config)
+    assert [str(directory / "mutagen"), "daemon", "stop"] in [call.argv for call in runner.calls]
+    assert not paths.cache.exists()
+
+
+def test_uninstall_leaves_a_path_mutagen_daemon_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    directory = mutagen_directory(paths.cache)
+    directory.mkdir(parents=True)
+    (directory / "mutagen").write_text("binary")
+    (directory / "mutagen-agents.tar.gz").write_text("agents")
+
+    def installed(_name: str) -> str | None:
+        return "/usr/local/bin/mutagen"
+
+    monkeypatch.setattr("offbox.uninstall.shutil.which", installed)
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "list"], stdout="[]")])
+    uninstall(paths, runner, yes=True, ssh_config=ssh_config)
+    assert all(call.argv[1:3] != ["daemon", "stop"] for call in runner.calls)

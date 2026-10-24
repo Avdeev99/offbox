@@ -15,6 +15,7 @@ from offbox.runner import Runner
 from offbox.ssh import close_master, remove_include
 from offbox.state import HostState, StateStore
 from offbox.sync import SyncManager
+from offbox.tools import cached_mutagen
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,15 @@ def _is_cloud(host: HostState) -> bool:
 
 def _describe(host: HostState) -> str:
     return f"{host.name} ({host.provider}, {host.address or 'no address yet'}, label offbox-host={host.name})"
+
+
+def _stop_cached_mutagen_daemon(paths: Paths, runner: Runner) -> None:
+    executable = cached_mutagen(paths.cache)
+    if executable is None or shutil.which("mutagen") is not None:
+        return
+    result = runner.run([str(executable), "daemon", "stop"], check=False, timeout=30)
+    if result.returncode != 0:
+        logger.warning("cannot stop the downloaded Mutagen daemon: %s", result.stderr.strip())
 
 
 def uninstall(
@@ -86,6 +96,7 @@ def uninstall(
             raise PreconditionError(
                 "Local state changed during uninstall", "Wait for other offbox operations to finish and retry uninstall."
             )
+        _stop_cached_mutagen_daemon(paths, runner)
         try:
             close_logs()
             for path in dict.fromkeys((paths.cache, paths.control, paths.state)):
