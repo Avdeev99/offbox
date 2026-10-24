@@ -96,13 +96,14 @@ def test_ssh_include_idempotent_and_preserves_user_config(tmp_path: Path) -> Non
     config = tmp_path / "home/.ssh/config"
     config.parent.mkdir(parents=True)
     config.write_text("Host personal\n  HostName example.com\n")
+    config.chmod(0o640)
     ensure_include(paths, config)
     first = config.read_text()
     ensure_include(paths, config)
     assert config.read_text() == first
     assert first.endswith("Host personal\n  HostName example.com\n")
     assert first.count("Include ") == 1
-    assert config.stat().st_mode & 0o777 == 0o600
+    assert config.stat().st_mode & 0o777 == 0o640
 
 
 class FakeClock:
@@ -625,7 +626,9 @@ def test_host_ssh_separator_preserves_exact_remote_arguments(
     assert calls == [["ssh", "offbox-main", "--", "printf %s 'a; touch /tmp/unwanted'"]]
 
 
-def test_missing_mutagen_does_not_strand_host_cleanup(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_missing_mutagen_does_not_strand_host_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     import subprocess
 
     from offbox.naming import Worktree
@@ -637,11 +640,7 @@ def test_missing_mutagen_does_not_strand_host_cleanup(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("offbox.runner.subprocess.run", missing)
 
-    def unavailable(_name: str) -> str | None:
-        return None
-
-    monkeypatch.setattr("offbox.sync.shutil.which", unavailable)
-    SyncManager(SubprocessRunner()).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))
+    SyncManager(SubprocessRunner(), cache=tmp_path).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))
     assert "Mutagen is not installed" in capsys.readouterr().err
 
 
@@ -1139,3 +1138,83 @@ def test_provider_copy_failure_removes_the_unrecorded_host_directory(tmp_path: P
         create_host(paths, runner, CreateOptions(name="main", provider="custom", ssh_key=key), executable=Path("tofu"))
     assert not (paths.state / "hosts/main").exists()
     assert StateStore(paths.state).read().hosts == {}
+
+
+def bootstrap_runner(tmp_path: Path) -> tuple[FakeRunner, Path]:
+    key = tmp_path / "identity"
+    key.write_text("client private")
+    key.with_name("identity.pub").write_text("ssh-ed25519 AAAA client")
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-keyscan"], stdout="192.0.2.1 ssh-ed25519 AAAA\n"),
+            Script(prefix=["ssh-add"], returncode=1),
+            Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA"),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    return runner, key
+
+
+def scanned_fingerprint() -> str:
+    import base64
+    import hashlib
+
+    return "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode("AAAA")).digest()).decode().rstrip("=")
+
+
+def test_pinned_fingerprint_allows_noninteractive_init_with_hardened_bootstrap(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from offbox.host.init import InitOptions, init_host
+
+    root = tmp_path / "home dir"
+    root.mkdir()
+    runner, key = bootstrap_runner(root)
+    host = init_host(
+        paths_at(root),
+        runner,
+        InitOptions(target="dev@192.0.2.1", ssh_key=key, host_key_fingerprint=scanned_fingerprint()),
+        ssh_config=root / "ssh/config",
+        clock=FakeClock(),
+        probe=lambda _a, _p, _t: True,
+    )
+    assert host.phase == "ready"
+    bootstrap = runner.calls[-2].argv
+    assert f'UserKnownHostsFile="{root}/state/hosts/main/known_hosts"' in bootstrap
+    for option in ("IdentitiesOnly=yes", "ForwardAgent=no", "ForwardX11=no"):
+        assert bootstrap[bootstrap.index(option) - 1] == "-o"
+    assert "without verification" not in capsys.readouterr().err
+
+
+def test_fingerprint_mismatch_stops_before_registration(tmp_path: Path) -> None:
+    from offbox.host.init import InitOptions, init_host
+
+    runner, key = bootstrap_runner(tmp_path)
+    expected = "SHA256:" + "A" * 43
+    with pytest.raises(PreconditionError, match="fingerprint mismatch") as caught:
+        init_host(paths_at(tmp_path), runner, InitOptions(target="dev@192.0.2.1", ssh_key=key, host_key_fingerprint=expected))
+    assert expected in caught.value.message and scanned_fingerprint() in caught.value.message
+    assert [call.argv[0] for call in runner.calls] == ["ssh-keyscan"]
+    assert not (tmp_path / "state/hosts").exists()
+
+
+def test_blind_host_key_acceptance_recommends_fingerprint(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from offbox.host.init import InitOptions, init_host
+
+    runner, key = bootstrap_runner(tmp_path)
+    init_host(
+        paths_at(tmp_path),
+        runner,
+        InitOptions(target="dev@192.0.2.1", ssh_key=key, accept_host_key=True),
+        ssh_config=tmp_path / "ssh/config",
+        clock=FakeClock(),
+        probe=lambda _a, _p, _t: True,
+    )
+    assert f"prefer --host-key-fingerprint {scanned_fingerprint()}" in capsys.readouterr().err
+
+
+def test_malformed_fingerprint_is_a_usage_error() -> None:
+    from offbox.errors import UsageError
+    from offbox.host.init import InitOptions
+
+    with pytest.raises(UsageError, match="Invalid host key fingerprint"):
+        InitOptions(target="dev@192.0.2.1", host_key_fingerprint="MD5:aa:bb")

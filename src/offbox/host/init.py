@@ -1,6 +1,7 @@
 import base64
 import binascii
 import hashlib
+import re
 import shlex
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -10,14 +11,14 @@ from pydantic import Field, field_validator
 
 from offbox import DEFAULT_IMAGE, __version__, console
 from offbox.config import Model
-from offbox.errors import OffboxError, PreconditionError
+from offbox.errors import OffboxError, PreconditionError, UsageError
 from offbox.host import host_operation, public_key
 from offbox.host.cloudinit import bootstrap_script
 from offbox.host.ready import Clock, tcp_probe, wait_ready
 from offbox.paths import Paths
 from offbox.providers import copy_provider, discover_provider, validate_name
 from offbox.runner import Runner
-from offbox.ssh import ensure_include, known_host, sync_config, validate_address, validate_user, write_private
+from offbox.ssh import ensure_include, known_host, quote_path, sync_config, validate_address, validate_user, write_private
 from offbox.state import HostState, StateStore
 
 
@@ -27,11 +28,19 @@ class InitOptions(Model):
     port: int = Field(default=22, ge=1, le=65535)
     ssh_key: Path | None = None
     accept_host_key: bool = False
+    host_key_fingerprint: str | None = None
 
     @field_validator("name")
     @classmethod
     def check_name(cls, value: str) -> str:
         return validate_name(value)
+
+    @field_validator("host_key_fingerprint")
+    @classmethod
+    def check_fingerprint(cls, value: str | None) -> str | None:
+        if value is not None and re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", value) is None:
+            raise UsageError("Invalid host key fingerprint", "Pass the SHA256:... value printed by ssh-keygen -lf on the server.")
+        return value
 
 
 def _init_host(
@@ -44,9 +53,10 @@ def _init_host(
     clock: Clock | None = None,
     probe: Callable[[str, int, float], bool] = tcp_probe,
 ) -> HostState:
-    if not options.accept_host_key and confirm is None:
+    if not options.accept_host_key and options.host_key_fingerprint is None and confirm is None:
         raise PreconditionError(
-            "Host key confirmation is required: --accept-host-key", "Review the host fingerprint and pass --accept-host-key."
+            "Host key verification needs a TTY, --host-key-fingerprint or --accept-host-key",
+            "Pass --host-key-fingerprint SHA256:... from ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server.",
         )
     if options.target.count("@") != 1:
         raise PreconditionError("Expected USER@ADDRESS", "Run offbox host init USER@ADDRESS.")
@@ -68,8 +78,17 @@ def _init_host(
         digest = base64.b64encode(hashlib.sha256(base64.b64decode(scanned_key.split()[1], validate=True)).digest()).decode().rstrip("=")
     except (ValueError, binascii.Error) as exc:
         raise PreconditionError("Invalid SSH host key", "Check the server's ed25519 key.") from exc
-    console.info(f"Host {address} fingerprint SHA256:{digest}")
-    if not options.accept_host_key and (confirm is None or not confirm(f"Trust SHA256:{digest} for {address}?")):
+    fingerprint = f"SHA256:{digest}"
+    console.info(f"Host {address} fingerprint {fingerprint}")
+    if options.host_key_fingerprint is not None:
+        if options.host_key_fingerprint != fingerprint:
+            raise PreconditionError(
+                f"Host key fingerprint mismatch for {address}: expected {options.host_key_fingerprint}, got {fingerprint}",
+                "Verify the server identity with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server before retrying.",
+            )
+    elif options.accept_host_key:
+        console.warn(f"Trusting {fingerprint} without verification; prefer --host-key-fingerprint {fingerprint}.")
+    elif confirm is None or not confirm(f"Trust {fingerprint} for {address}?"):
         raise PreconditionError("Host key was not accepted", "Verify the fingerprint and rerun offbox host init.")
     authorized_key = public_key(runner, key)
     directory = paths.state / "hosts" / options.name
@@ -129,7 +148,13 @@ def _init_host(
                 "-o",
                 f"HostKeyAlias=offbox-{host.name}",
                 "-o",
-                f"UserKnownHostsFile={host.known_hosts_path}",
+                f"UserKnownHostsFile={quote_path(host.known_hosts_path)}",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "ForwardAgent=no",
+                "-o",
+                "ForwardX11=no",
                 "-i",
                 str(key),
                 "-p",
