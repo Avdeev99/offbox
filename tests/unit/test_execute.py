@@ -209,6 +209,27 @@ def test_signal_retries_metadata_race_and_preserves_drain(tmp_path: Path, number
     assert clock.value == pytest.approx(0.3)
 
 
+def test_terminal_hangup_relays_term_to_the_remote_run_and_reports_sighup(tmp_path: Path) -> None:
+    import signal
+
+    from offbox.execute import Executor, SignalState
+
+    work, host = context()
+    clock = FakeClock()
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"], method="start_stream", stream_results=[None, None, 129]),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], stdout="143\n"),
+        ]
+    )
+    process = runner.start_stream(["ssh"])
+    state = SignalState(clock)
+    state.receive(signal.SIGHUP, None)
+    assert Executor(paths(tmp_path), runner, clock=clock).interrupt(process, state, host, work, "a" * 32) == 128 + signal.SIGHUP
+    assert runner.calls[1].argv[-1] == f"docker exec {work.container} offbox-run --signal TERM " + "a" * 32
+
+
 def test_signal_deadline_kills_once_and_warns_exact_remote_cleanup(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from offbox.execute import Executor, SignalState
 

@@ -30,6 +30,7 @@ def parsing_app() -> typer.Typer:
         (["exec", "--env", "PASSWORD=parse-password-one-z97", "--", "true"], "parse-password-one-z97"),
         (["-v", "exec", "--env=API_TOKEN=equal-token-two-k83", "--", "true"], "equal-token-two-k83"),
         (["exec", "--env", "PASSWORD=bad-option-secret-three-q65", "--unknown-option"], "bad-option-secret-three-q65"),
+        (["exec", "--env", "DATABASE_URL=postgres://u:hunter2-four-m27@db", "--unknown-option"], "hunter2-four-m27"),
     ],
 )
 def test_explicit_exec_secret_is_redacted_before_initial_invocation_logging(

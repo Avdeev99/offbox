@@ -341,12 +341,13 @@ class Runtime:
         )
 
     def up(self, *, cwd: Path | None = None, host_name: str | None = None, fresh: bool = False, no_stack: bool = False) -> EnvState:
-        from offbox.execute import Executor, execution_env, install_paths
+        from offbox.execute import Executor, check_exec_env, execution_env, install_paths, unapproved_exec_env
 
         work = find_worktree(self.runner, cwd)
         project = load_config(work.root / "offbox.toml", ProjectConfig)
         install_paths(project.install.when)
         execution_env(project.exec.env, {}, tty=False)
+        check_exec_env(self.paths, project.exec.env)
         config = project.env
         dockerfile = self.dockerfile_path(work, config.dockerfile) if config.dockerfile is not None else None
         previous = self._recorded(work)
@@ -374,7 +375,10 @@ class Runtime:
                 ):
                     raise PreconditionError("Environment or host changed while preparing up", "Retry offbox up.")
                 env = previous or EnvState(name=work.name, host=host.name, worktree_path=work.root, created_at=datetime.now(UTC))
+                added = [] if env.approved_exec_env is None else unapproved_exec_env(project.exec.env, env.approved_exec_env)
                 state.envs[env.name] = env
+            if added:
+                console.warn("Forwarding new local variables to the environment: " + ", ".join(added))
             self.mutate(host, work, "prepare")
             self.sync.ensure(work, host, project.sync)
             built: BuiltImage | None = None
@@ -406,6 +410,7 @@ class Runtime:
                 if current.host != host.name or current.worktree_path != work.root:
                     raise PreconditionError("Environment registration changed", "Run offbox list before retrying.")
                 current.image_digest = env.image_digest
+                current.approved_exec_env = sorted(set(project.exec.env))
                 env = current
         console.success(f"Environment {env.name} ready on {host.name}")
         return env

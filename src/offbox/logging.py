@@ -13,6 +13,7 @@ from offbox.paths import Paths
 
 _registered_secrets: set[str] = set()
 _SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY|CREDENTIALS|KEYFILE_JSON)$", re.IGNORECASE)
+_STANDALONE_VALUE_LENGTH = 8
 _NO_LOG_OPTIONS = frozenset({"--help", "--version"})
 _invocation: ContextVar[str] = ContextVar("offbox_invocation", default="")
 _environment: ContextVar[str | None] = ContextVar("offbox_environment", default=None)
@@ -64,6 +65,17 @@ def register_secrets(env: Mapping[str, str]) -> None:
     _registered_secrets.update(part for value in values for part in value.splitlines() if part)
 
 
+def register_env_values(env: Mapping[str, str]) -> None:
+    """Redact forwarded values regardless of name; short values only as NAME=value to keep logs readable."""
+    for name, value in env.items():
+        if not value:
+            continue
+        standalone = len(value) >= _STANDALONE_VALUE_LENGTH or _SECRET_NAME.search(name) is not None
+        secret = value if standalone else f"{name}={value}"
+        _registered_secrets.add(secret)
+        _registered_secrets.update(part for part in secret.splitlines() if part and (standalone or len(part) >= _STANDALONE_VALUE_LENGTH))
+
+
 def register_exec_secrets(argv: Sequence[str]) -> None:
     command = next((index for index, value in enumerate(argv) if not value.startswith("-")), None)
     if command is None or argv[command] != "exec":
@@ -84,7 +96,7 @@ def register_exec_secrets(argv: Sequence[str]) -> None:
         if entry is not None:
             name, separator, value = entry.partition("=")
             if separator:
-                register_secrets({name: value})
+                register_env_values({name: value})
         index += 1
 
 

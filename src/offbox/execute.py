@@ -1,3 +1,4 @@
+import contextvars
 import fcntl
 import logging
 import os
@@ -6,22 +7,27 @@ import shlex
 import signal
 import stat
 import sys
+import threading
 import uuid
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
+from importlib.resources import files
 from pathlib import Path, PurePosixPath
 from types import FrameType
 
 from pydantic import Field, SecretStr, ValidationError
 
 from offbox import console
-from offbox.config import InstallConfig, Model, ProjectConfig, load_config
+from offbox.config import InstallConfig, Model, PortsConfig, ProjectConfig, load_config
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError, UsageError
 from offbox.host import host_operation
 from offbox.host.ready import Clock, SystemClock
-from offbox.logging import register_secrets
+from offbox.locking import acquire_lock
+from offbox.logging import register_env_values, register_secrets
 from offbox.naming import Worktree, validate_env_name
 from offbox.paths import Paths
+from offbox.ports import PortContainer, PortManager, PortSnapshot, compose_discovery
+from offbox.providers import load_provider
 from offbox.runner import Runner, StreamProcess
 from offbox.ssh import ssh_argv
 from offbox.state import HostState
@@ -30,6 +36,13 @@ from offbox.timings import measured, stage
 logger = logging.getLogger(__name__)
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _CONNECTION_FIX = "offbox status"
+_CREDENTIAL_ENV = frozenset(
+    {"HCLOUD_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_OAUTH_ACCESS_TOKEN", "CLOUDSDK_AUTH_ACCESS_TOKEN", "SSH_AUTH_SOCK"}
+)
+_PUBLIC_PROVIDER_ENV = frozenset({"GOOGLE_PROJECT"})
+INSTALL_WAIT_SECONDS = 600
+PORT_RESTORE_JOIN_SECONDS = 10
+_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 class ExecOptions(Model):
@@ -45,15 +58,52 @@ class InstallProbe(Model):
     marker: str = Field(pattern=r"^(?:missing|[a-f0-9]{64})$")
 
 
+class Preflight(Model):
+    containers: list[PortContainer]
+    install: str
+    compose: str
+    compose_failed: bool
+
+
 def parse_env(entries: Sequence[str]) -> dict[str, SecretStr]:
     result: dict[str, SecretStr] = {}
     for entry in entries:
         name, separator, value = entry.partition("=")
         if not separator or _ENV_NAME.fullmatch(name) is None or "\0" in value:
             raise UsageError("Invalid --env value", "Use --env NAME=value with a valid environment variable name.")
-        register_secrets({name: value})
+        register_env_values({name: value})
         result[name] = SecretStr(value)
     return result
+
+
+def credential_env_names(paths: Paths) -> frozenset[str]:
+    """Variables that provider manifests read as credentials; exec.env must never forward them from the laptop."""
+    directories = [Path(str(entry)) for entry in files("offbox").joinpath("_data", "providers").iterdir() if entry.is_dir()]
+    custom = paths.config / "providers"
+    if custom.is_dir():
+        directories.extend(sorted(path for path in custom.iterdir() if path.is_dir()))
+    names = set(_CREDENTIAL_ENV)
+    for directory in directories:
+        if not (directory / "provider.toml").is_file():
+            continue
+        try:
+            names.update(load_provider(directory).manifest.credentials_env)
+        except PreconditionError:
+            logger.warning("Ignoring unreadable provider manifest %s", directory, exc_info=True)
+    return frozenset(names - _PUBLIC_PROVIDER_ENV)
+
+
+def check_exec_env(paths: Paths, configured: Sequence[str]) -> None:
+    blocked = sorted(set(configured) & credential_env_names(paths))
+    if blocked:
+        raise PreconditionError(
+            "exec.env must not forward provider credentials: " + ", ".join(blocked),
+            "Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value.",
+        )
+
+
+def unapproved_exec_env(configured: Sequence[str], approved: Sequence[str] | None) -> list[str]:
+    return sorted(set(configured) - set(approved or ()))
 
 
 def execution_env(
@@ -65,6 +115,7 @@ def execution_env(
         raise PreconditionError("Invalid exec.env name", "Configure exec.env as environment variable names.")
     result = {name: values[name] for name in names if name in values}
     result.update({name: value.get_secret_value() for name, value in overrides.items()})
+    register_env_values({name: value for name, value in result.items() if name in configured or name in overrides})
     register_secrets(result)
     return result
 
@@ -115,7 +166,7 @@ class SignalState:
 
 @contextmanager
 def capture_signals(state: SignalState) -> Generator[None]:
-    previous = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)}
+    previous = {number: signal.getsignal(number) for number in _SIGNALS}
     try:
         for number in previous:
             signal.signal(number, state.receive)
@@ -183,13 +234,69 @@ printf '%s\n' "$2" > "$tmp"
 mv -f -- "$tmp" "$path/install.sha256"
 """
 
+_PROBE_FUNCTIONS = "offbox_hash() (\n" + _HASH + "\n)\noffbox_marker() (\n" + _MARKER_READ + "\n)\n"
 INSTALL_PROBE_SCRIPT = (
     "set -eu\n"
-    "offbox_hash() (\n" + _HASH + "\n)\n"
-    "offbox_marker() (\n" + _MARKER_READ + "\n)\n"
-    "offbox_work=$1\noffbox_directory=$2\nshift 2\n"
-    'offbox_hash "$offbox_work" "$@"\noffbox_marker "$offbox_directory"\n'
+    + _PROBE_FUNCTIONS
+    + "offbox_work=$1\noffbox_directory=$2\nshift 2\n"
+    + 'offbox_hash "$offbox_work" "$@"\noffbox_marker "$offbox_directory"\n'
 )
+PREFLIGHT_SCRIPT = (
+    "set -eu\n"
+    + _PROBE_FUNCTIONS
+    + r"""name=$1
+worktree=$2
+container=$3
+probe=$4
+discover=$5
+work=$6
+directory=$7
+shift 7
+failure=$(mktemp)
+trap 'rm -f -- "$failure"' EXIT HUP INT TERM
+if ! inspection=$(docker container inspect "$container" 2>"$failure"); then
+    if grep -qi -e 'no such container' -e 'no such object' "$failure"; then
+        inspection='[]'
+    else
+        cat -- "$failure" >&2
+        exit 1
+    fi
+fi
+install=
+compose=
+compose_failed=false
+if printf '%s\n' "$inspection" | jq -e --arg name "$name" --arg worktree "$worktree" --arg container "$container" '
+    length == 1 and .[0].Name == ("/" + $container)
+    and .[0].Config.Labels["offbox.env"] == $name
+    and .[0].Config.Labels["offbox.worktree"] == $worktree
+    and .[0].State.Running == true
+' >/dev/null; then
+    if [ "$probe" = 1 ]; then
+        install=$(offbox_hash "$work" "$@" && offbox_marker "$directory")
+    fi
+    if [ "$discover" = 1 ]; then
+        if ! compose=$(docker exec -u dev -w /work "$container" docker compose ps --format json 2>"$failure"); then
+            cat -- "$failure" >&2
+            compose=
+            compose_failed=true
+        fi
+    fi
+fi
+printf '%s\n' "$inspection" | jq -c --arg install "$install" --arg compose "$compose" --argjson compose_failed "$compose_failed" \
+    '{containers: ., install: $install, compose: $compose, compose_failed: $compose_failed}'
+"""
+)
+
+
+def parse_install_probe(text: str) -> InstallProbe:
+    hash_line, separator, marker = text.partition("\n")
+    match = re.fullmatch(r"([a-f0-9]{64})  -", hash_line)
+    if not separator or match is None:
+        raise PreconditionError("Invalid remote install hash", "Check the host sha256sum command and retry.")
+    try:
+        return InstallProbe(digest=match[1], marker=marker.rstrip())
+    except ValidationError as exc:
+        raise PreconditionError("Invalid installation marker", "Remove the host .offbox/install.sha256 marker and retry.") from exc
 
 
 def install_paths(names: Sequence[str]) -> list[str]:
@@ -228,6 +335,7 @@ class Executor:
     def interrupt(self, process: StreamProcess, state: SignalState, host: HostState, work: Worktree, run_id: str) -> int:
         """Relay a recorded signal within the ten-second cleanup budget."""
         number = state.number or signal.SIGINT
+        relayed = "TERM" if number == signal.SIGHUP else signal.Signals(number).name[3:]
         deadline = (state.received_at if state.received_at is not None else self.clock.now()) + 9
         accepted = False
         confirmed = False
@@ -238,9 +346,7 @@ class Executor:
             try:
                 if not confirmed and not accepted:
                     result = self.runner.run(
-                        ssh_argv(
-                            host.name, ["docker", "exec", work.container, "offbox-run", "--signal", signal.Signals(number).name[3:], run_id]
-                        ),
+                        ssh_argv(host.name, ["docker", "exec", work.container, "offbox-run", "--signal", relayed, run_id]),
                         check=False,
                         timeout=min(1, deadline - self.clock.now()),
                     )
@@ -276,6 +382,7 @@ class Executor:
         force_pty: bool = False,
         stdin: bool = False,
         diagnostics: bool = False,
+        started: Callable[[], None] | None = None,
     ) -> int:
         run_id = self.id_factory()
         register_secrets(env or {})
@@ -292,20 +399,23 @@ class Executor:
             diagnostics=diagnostics,
         )
         if tty:
+            if started is not None:
+                started()
             status = self.runner.stream(argv, tty=True, stdin=True)
         else:
             state = SignalState(self.clock)
             with capture_signals(state):
                 process = self.runner.start_stream(argv, stdin=stdin)
                 try:
+                    if started is not None:
+                        started()
                     while True:
                         if state.number is not None:
                             return self.interrupt(process, state, host, work, run_id)
-                        observed = process.poll()
+                        observed = process.wait(timeout=0.1)
                         if observed is not None:
                             status = observed
                             break
-                        self.clock.sleep(0.05)
                 finally:
                     if state.number is None and process.poll() is None:
                         process.kill()
@@ -334,7 +444,8 @@ class Executor:
         return result.stdout
 
     @contextmanager
-    def installation_lock(self, work: Worktree) -> Generator[None]:
+    def installation_lock(self, work: Worktree, *, wait: float = 0) -> Generator[bool]:
+        """Yield whether the lock was contended, so callers re-check work another process may have finished."""
         validate_env_name(work.name)
         directory = self.paths.state / "install-locks"
         try:
@@ -347,13 +458,24 @@ class Executor:
                 metadata = os.fstat(descriptor)
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
                     raise PreconditionError("Unsafe install lock", "Remove the conflicting install lock and retry.")
+                waited = False
                 try:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError as exc:
-                    raise PreconditionError(
-                        "Installation is already running for this environment", "Retry after the current installation finishes."
-                    ) from exc
-                yield
+                except BlockingIOError:
+                    if wait <= 0:
+                        raise PreconditionError(
+                            "Installation is already running for this environment", "Retry after the current installation finishes."
+                        ) from None
+                    console.step("Waiting for another installation in this environment to finish")
+                    acquire_lock(
+                        descriptor,
+                        timeout=wait,
+                        clock=self.clock,
+                        message="Installation is still running for this environment",
+                        fix="Retry after the current installation finishes.",
+                    )
+                    waited = True
+                yield waited
             finally:
                 os.close(descriptor)
         except OSError as exc:
@@ -370,14 +492,7 @@ class Executor:
         result = self._remote(
             host, ["sh", "-s", "--", work.work, work.directory, *install_paths(names)], input=INSTALL_PROBE_SCRIPT, timeout=60
         )
-        hash_line, separator, marker = result.partition("\n")
-        match = re.fullmatch(r"([a-f0-9]{64})  -", hash_line)
-        if not separator or match is None:
-            raise PreconditionError("Invalid remote install hash", "Check the host sha256sum command and retry.")
-        try:
-            return InstallProbe(digest=match[1], marker=marker.rstrip())
-        except ValidationError as exc:
-            raise PreconditionError("Invalid installation marker", "Remove the host .offbox/install.sha256 marker and retry.") from exc
+        return parse_install_probe(result)
 
     def _stage(self, work: Worktree, host: HostState, command: str, *, env: Mapping[str, str] | None = None) -> None:
         status = self.run(work, host, ["sh", "-c", command], env=env, diagnostics=True)
@@ -388,15 +503,27 @@ class Executor:
 
     @measured("Dependencies")
     def install(
-        self, work: Worktree, host: HostState, config: InstallConfig, *, always: bool = False, env: Mapping[str, str] | None = None
+        self,
+        work: Worktree,
+        host: HostState,
+        config: InstallConfig,
+        *,
+        always: bool = False,
+        env: Mapping[str, str] | None = None,
+        probe: InstallProbe | None = None,
     ) -> None:
         if config.command is None:
             return
         install_paths(config.when)
-        with self.installation_lock(work):
-            probe = self.install_probe(work, host, config.when)
-            if not always and probe.marker == probe.digest:
+        if not always:
+            current = probe or self.install_probe(work, host, config.when)
+            if current.marker == current.digest:
                 return
+        with self.installation_lock(work, wait=INSTALL_WAIT_SECONDS) as waited:
+            if waited and not always:
+                current = self.install_probe(work, host, config.when)
+                if current.marker == current.digest:
+                    return
             console.step("Installing dependencies" if always else "lockfile changed, running install")
             self._stage(work, host, config.command, env=env)
             digest = self.install_hash(work, host, config.when)
@@ -415,14 +542,46 @@ class Executor:
             with stage("Stack startup"):
                 self._stage(work, host, stack, env=env)
 
-    def execute(self, options: ExecOptions, *, cwd: Path | None = None) -> int:
-        from offbox.runtime import Runtime
+    def preflight(self, work: Worktree, host: HostState, project: ProjectConfig) -> Preflight:
+        """Inspect the container, probe the install marker and list Compose ports in one SSH round trip."""
+        probe = project.install.command is not None
+        discover = compose_discovery(work.root, project.ports)
+        result = self.runner.run(
+            ssh_argv(
+                host.name,
+                [
+                    "sh",
+                    "-s",
+                    "--",
+                    work.name,
+                    str(work.root),
+                    work.container,
+                    "1" if probe else "0",
+                    "1" if discover else "0",
+                    work.work,
+                    work.directory,
+                    *install_paths(project.install.when),
+                ],
+            ),
+            check=False,
+            timeout=60,
+            input=PREFLIGHT_SCRIPT,
+        )
+        if result.returncode == 255:
+            raise ConnectionError_(f"Cannot reach host {host.name}", f"Run offbox host ssh {host.name} and check connectivity.")
+        if result.returncode:
+            raise CommandFailed(result.argv, result.returncode, result.stderr)
+        try:
+            return Preflight.model_validate_json(result.stdout)
+        except ValidationError as exc:
+            raise PreconditionError("Invalid environment preflight response", "Check the host Docker daemon and offbox logs.") from exc
 
-        runtime = Runtime(self.paths, self.runner, clock=self.clock)
-        work, _, host = runtime.current(cwd)
-        container = runtime.inspect(host, work)
-        if container is None or not container.state.running:
-            raise PreconditionError("Environment is not running", "offbox up")
+    def _owned(self, work: Worktree, preflight: Preflight) -> bool:
+        if not preflight.containers:
+            return False
+        if len(preflight.containers) != 1:
+            raise PreconditionError("Environment ownership labels do not match", "Run offbox list and resolve conflicting resources.")
+        container = preflight.containers[0]
         labels = container.config.labels or {}
         if (
             container.name.lstrip("/") != work.container
@@ -430,8 +589,44 @@ class Executor:
             or labels.get("offbox.worktree") != str(work.root)
         ):
             raise PreconditionError("Environment ownership labels do not match", "Run offbox list and resolve conflicting resources.")
+        return container.state.running
+
+    def restore_ports(
+        self, manager: PortManager, work: Worktree, host: HostState, config: PortsConfig, snapshot: PortSnapshot | None
+    ) -> list[str]:
+        """Restore forwards without blocking on a busy host lock; failures become warnings and never affect the command."""
+        warnings: list[str] = []
+        try:
+            with host_operation(self.paths, host.name, clock=self.clock):
+                manager.restore(work, host, config, snapshot=snapshot, warn=warnings.append)
+        except OffboxError as exc:
+            logger.info("port restore skipped", exc_info=True)
+            if isinstance(exc.__cause__, BlockingIOError):
+                warnings.append(
+                    "Port forwards were not restored because another offbox operation is running. "
+                    "Fix: run offbox ports after it finishes; the next offbox exec also restores them."
+                )
+            else:
+                warnings.append(f"Port forwards were not restored: {exc.message}. Fix: {exc.fix or 'run offbox ports.'}")
+        except Exception:
+            logger.exception("unexpected port restore failure")
+            warnings.append("Port forwards were not restored after an unexpected error. Fix: check offbox logs and run offbox ports.")
+        return warnings
+
+    def execute(self, options: ExecOptions, *, cwd: Path | None = None) -> int:
+        from offbox.runtime import Runtime
+
+        runtime = Runtime(self.paths, self.runner, clock=self.clock)
+        work, recorded, host = runtime.current(cwd)
         project = load_config(work.root / "offbox.toml", ProjectConfig)
         install_paths(project.install.when)
+        check_exec_env(self.paths, project.exec.env)
+        unapproved = unapproved_exec_env(project.exec.env, recorded.approved_exec_env)
+        if unapproved:
+            raise PreconditionError(
+                "exec.env forwards variables that offbox up has not approved: " + ", ".join(unapproved),
+                "Review exec.env in offbox.toml, then run offbox up to approve it.",
+            )
         local = (cwd or Path.cwd()).resolve()
         try:
             relative = local.relative_to(work.root)
@@ -443,17 +638,46 @@ class Executor:
         command_argv(work, host, options.command, run_id=self.id_factory(), directory=directory, env=env)
         if not options.no_sync:
             runtime.sync.flush(work, host)
-        self.install(work, host, project.install, env=env)
-        with host_operation(self.paths, host.name, wait_timeout=120, clock=self.clock):
-            runtime.ports.restore(work, host, project.ports)
-        with stage("Command execution"):
-            return self.run(
-                work,
-                host,
-                options.command,
-                directory=directory,
-                env=env,
-                tty=tty,
-                force_pty=options.tty is True and not (sys.stdin.isatty() and sys.stdout.isatty()),
-                stdin=options.stdin,
-            )
+        preflight = self.preflight(work, host, project)
+        if not self._owned(work, preflight):
+            if not options.no_sync:
+                try:
+                    runtime.sync.pause(work, host)
+                except OffboxError:
+                    logger.warning("Cannot pause sync for a stopped environment", exc_info=True)
+            raise PreconditionError("Environment is not running", "offbox up")
+        probe = parse_install_probe(preflight.install) if project.install.command is not None else None
+        self.install(work, host, project.install, env=env, probe=probe)
+        snapshot = None if preflight.compose_failed else PortSnapshot(containers=preflight.containers, compose=preflight.compose)
+        warnings: list[str] = []
+        deferred = tty
+
+        def restore() -> None:
+            for message in self.restore_ports(runtime.ports, work, host, project.ports, snapshot):
+                if deferred:
+                    warnings.append(message)
+                else:
+                    console.warn(message)
+
+        context = contextvars.copy_context()
+        worker = threading.Thread(target=context.run, args=(restore,), name="offbox-port-restore", daemon=True)
+        try:
+            with stage("Command execution"):
+                return self.run(
+                    work,
+                    host,
+                    options.command,
+                    directory=directory,
+                    env=env,
+                    tty=tty,
+                    force_pty=options.tty is True and not (sys.stdin.isatty() and sys.stdout.isatty()),
+                    stdin=options.stdin,
+                    started=worker.start,
+                )
+        finally:
+            if worker.is_alive():
+                worker.join(PORT_RESTORE_JOIN_SECONDS)
+            for message in warnings:
+                console.warn(message)
+            if worker.is_alive():
+                console.warn("Port forwards are still being restored. Fix: run offbox ports to finish restoring them.")

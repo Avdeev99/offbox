@@ -39,6 +39,7 @@ class EnvState(Model):
     local_ports: dict[int, int] = Field(default_factory=dict[int, int])
     active_forwards: list[int] = Field(default_factory=list[int])
     image_digest: str | None = None
+    approved_exec_env: list[str] | None = None
 
 
 class State(Model):
