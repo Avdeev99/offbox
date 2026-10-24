@@ -28,6 +28,7 @@ class ErrorGroup(TyperGroup):
         log_path = paths.log_file()
         try:
             register_exec_secrets(args)
+            paths.secure_roots()
             configure(paths, [info_name or "offbox", *args])
             return super().make_context(info_name, args, parent, **extra)
         except ClickException as exc:

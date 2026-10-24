@@ -73,18 +73,38 @@ def test_setup_cli_non_tty_passes_explicit_options_without_prompts(tmp_path: Pat
         *,
         ask: Callable[[str, str], str] | None = None,
         confirm: Callable[[str], bool] | None = None,
+        offer: Callable[[str], bool] | None = None,
     ) -> None:
         assert selected == paths
-        assert ask is None and confirm is None
+        assert ask is None and confirm is None and offer is None
         seen.append(options)
 
     monkeypatch.setattr("offbox.cli.misc.Paths.discover", lambda: paths)
-    monkeypatch.setattr("offbox.cli.misc.run_setup", setup)
+    monkeypatch.setattr("offbox.setup.setup", setup)
+    fingerprint = "SHA256:" + "A" * 43
     result = CliRunner().invoke(
-        app, ["setup", "--provider", "ssh", "--action", "init", "--target", "owner@example.com", "--port", "2222", "--accept-host-key"]
+        app,
+        [
+            "setup",
+            "--provider",
+            "ssh",
+            "--action",
+            "init",
+            "--target",
+            "owner@example.com",
+            "--port",
+            "2222",
+            "--accept-host-key",
+            "--host-key-fingerprint",
+            fingerprint,
+        ],
     )
     assert result.exit_code == 0
-    assert seen == [SetupOptions(provider="ssh", action="init", target="owner@example.com", port=2222, accept_host_key=True)]
+    assert seen == [
+        SetupOptions(
+            provider="ssh", action="init", target="owner@example.com", port=2222, accept_host_key=True, host_key_fingerprint=fingerprint
+        )
+    ]
 
 
 def test_human_status_lists_each_port_mapping_and_active_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
