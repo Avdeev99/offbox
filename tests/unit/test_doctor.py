@@ -27,10 +27,31 @@ def _paths(root: Path) -> Paths:
     return Paths(root / "config", root / "state", root / "cache", root / "control")
 
 
+def _register_default_host(paths: Paths, root: Path) -> None:
+    StateStore(paths.state).write(
+        State(
+            default_host="main",
+            hosts={
+                "main": HostState(
+                    name="main",
+                    provider="ssh",
+                    address="192.0.2.1",
+                    ssh_user="offbox",
+                    created_at=datetime(2026, 10, 23, tzinfo=UTC),
+                    known_hosts_path=root / "known_hosts",
+                )
+            },
+        )
+    )
+
+
 def test_all_doctor_checks_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    runner = FakeRunner([*_tool_scripts(), Script(prefix=["ssh-add", "-l"], stdout="256 SHA256:agent test (ED25519)")])
+    runner = FakeRunner(
+        [*_tool_scripts(), Script(prefix=["ssh", "-o"]), Script(prefix=["ssh-add", "-l"], stdout="256 SHA256:agent test (ED25519)")]
+    )
     paths = _paths(tmp_path)
+    _register_default_host(paths, tmp_path)
     report = diagnose(paths, runner, project_root=tmp_path, tools=ToolDiscovery(runner, paths.cache, lookup=lambda name: name))
     assert report.ok is True
     assert report.exit_code == 0
@@ -226,7 +247,35 @@ def test_explicit_setup_key_is_checked_instead_of_missing_default_key(tmp_path: 
         ]
     )
     report = diagnose(paths, runner, project_root=tmp_path, tools=ToolDiscovery(runner, paths.cache, lookup=lambda name: name), ssh_key=key)
-    assert report.ok
+    assert [check.name for check in report.checks if not check.ok] == ["host"]
     assert report.checks[-1].name == "ssh-key"
     assert report.checks[-1].message == "SSH key is usable without a prompt"
     assert runner.scripts == []
+
+
+def test_missing_default_host_is_a_failure_pointing_to_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    runner = FakeRunner([*_tool_scripts(), Script(prefix=["ssh-add", "-l"], stdout="256 SHA256:agent test (ED25519)")])
+    paths = _paths(tmp_path)
+    report = diagnose(paths, runner, project_root=tmp_path, tools=ToolDiscovery(runner, paths.cache, lookup=lambda name: name))
+    assert [check for check in report.checks if not check.ok] == [
+        Check(name="host", ok=False, message="No default host configured", fix="Run offbox setup.")
+    ]
+    assert report.exit_code == 3
+
+
+def test_doctor_reports_the_downloaded_mutagen(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.tools import mutagen_directory
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    paths = _paths(tmp_path)
+    directory = mutagen_directory(paths.cache)
+    directory.mkdir(parents=True)
+    (directory / "mutagen-agents.tar.gz").write_bytes(b"agents")
+    (directory / "mutagen").write_bytes(b"binary")
+    scripts = [script for script in _tool_scripts() if script.prefix[0] != "mutagen"]
+    runner = FakeRunner([*scripts, Script(prefix=[str(directory / "mutagen"), "--version"], stdout="Mutagen version 0.18.1")])
+    discovery = ToolDiscovery(runner, paths.cache, lookup=lambda name: None if name == "mutagen" else name)
+    report = diagnose(paths, runner, project_root=tmp_path, tools=discovery)
+    mutagen = next(check for check in report.checks if check.name == "mutagen")
+    assert mutagen == Check(name="mutagen", ok=True, message=f"mutagen 0.18.1 ({directory / 'mutagen'}, downloaded by offbox)")

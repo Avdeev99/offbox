@@ -17,7 +17,7 @@ def select_host(paths: Paths, name: str | None = None) -> HostState:
     state = StateStore(paths.state).read()
     selected = name or default_host(load_config(paths.user_config, UserConfig), state.default_host)
     if selected is None:
-        raise PreconditionError("No default host", "Run offbox host create or offbox host use NAME.")
+        raise PreconditionError("No default host", "Run offbox setup, or offbox host use NAME.")
     validate_name(selected)
     if selected not in state.hosts:
         raise PreconditionError(f"Unknown host: {selected}", "Run offbox host list or create this host.")

@@ -9,6 +9,8 @@ from offbox.runner import Runner
 from offbox.state import State, StateStore
 from offbox.tools import ToolDiscovery
 
+NO_DEFAULT_HOST = "No default host configured"
+
 
 class Check(Model):
     name: str
@@ -63,7 +65,8 @@ def diagnose(
     for name in ("ssh", "git", "mutagen", "tofu"):
         try:
             tool = discovery.check(name)
-            report.checks.append(Check(name=name, ok=True, message=f"{tool.name} {tool.version} ({tool.path})"))
+            source = ", downloaded by offbox" if tool.path.is_relative_to(paths.cache) else ""
+            report.checks.append(Check(name=name, ok=True, message=f"{tool.name} {tool.version} ({tool.path}{source})"))
         except OffboxError as exc:
             report.checks.append(_failure(name, exc))
     user: UserConfig | None = None
@@ -102,7 +105,7 @@ def diagnose(
     if user is not None and state is not None:
         selected = default_host(user, state.default_host)
         if selected is None:
-            report.checks.append(Check(name="host", ok=True, message="No default host configured"))
+            report.checks.append(Check(name="host", ok=False, message=NO_DEFAULT_HOST, fix="Run offbox setup."))
         else:
             host = state.hosts.get(selected)
             if host is None:

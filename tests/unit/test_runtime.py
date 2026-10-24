@@ -159,13 +159,7 @@ def sync_ready_scripts(root: Path, name: str, *, fresh: bool = False, custom: bo
     result = sync_response(root, name)
     commands = [Script(prefix=["mutagen", "sync", "list"], stdout="[]"), Script(prefix=["mutagen", "sync", "create"])]
     if custom:
-        commands.extend(
-            [
-                Script(prefix=["mutagen", "sync", "list"], stdout=result),
-                Script(prefix=["mutagen", "sync", "flush"]),
-                Script(prefix=["mutagen", "sync", "list"], stdout=result),
-            ]
-        )
+        commands.extend([Script(prefix=["mutagen", "sync", "flush"]), Script(prefix=["mutagen", "sync", "list"], stdout=result)])
     if fresh:
         commands.extend(
             [
@@ -175,12 +169,7 @@ def sync_ready_scripts(root: Path, name: str, *, fresh: bool = False, custom: bo
                 Script(prefix=["mutagen", "sync", "resume"]),
             ]
         )
-    return [
-        *commands,
-        Script(prefix=["mutagen", "sync", "list"], stdout=result),
-        Script(prefix=["mutagen", "sync", "flush"]),
-        Script(prefix=["mutagen", "sync", "list"], stdout=result),
-    ]
+    return [*commands, Script(prefix=["mutagen", "sync", "flush"]), Script(prefix=["mutagen", "sync", "list"], stdout=result)]
 
 
 def test_remove_cleans_remote_resources_before_state(tmp_path: Path) -> None:

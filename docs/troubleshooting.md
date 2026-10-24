@@ -17,6 +17,7 @@ Use `offbox --help` or the command’s `--help` to inspect flags. Destructive op
 - `Fix: Restart offbox.`
 - `Fix: Run offbox gc --dry-run to review, then offbox gc --yes.`
 - `Fix: Run offbox rm --yes to confirm removal.`
+- `Fix: Run offbox up --fresh --yes.`
 - `Fix: Run offbox shell in an interactive terminal.`
 - `Fix: Run the command again when ready.`
 - `Fix: Choose one TTY mode.`
@@ -50,16 +51,21 @@ Correct the named file or key, then retry. Keep provider workspaces and state un
 
 ## Tools and local processes
 
-Check `offbox doctor` first. Mutagen is a separate installation. OpenTofu downloads are verified before execution; install a supported binary on PATH if downloads are unavailable. Inspect an interrupted provisioning operation before retrying creation.
+Check `offbox doctor` first; it names the Mutagen binary in use. `offbox setup` offers a verified Mutagen 0.18.1 download when none is on PATH, and OpenTofu downloads are verified before execution; install a supported binary on PATH if downloads are unavailable. After switching Mutagen versions, run `mutagen daemon stop`. Inspect an interrupted provisioning operation before retrying creation.
 
-- `Fix: Check your network or install OpenTofu >=1.8 on PATH.`
+- `Fix: Check your network and retry, or install the tool on PATH.`
+- `Fix: Retry, or install the tool on PATH.`
 - `Fix: Clear <directory> and retry, or install OpenTofu on PATH.`
 - `Fix: Install <name>.`
-- `Fix: Install Mutagen 0.18.x: brew install mutagen-io/mutagen/mutagen (macOS), or https://github.com/mutagen-io/mutagen/releases.`
-- `Fix: Install OpenSSH >=8.0.`
+- `Fix: Run offbox setup to download Mutagen, or install Mutagen 0.18.x.`
+- `Fix: Install Mutagen 0.18.x, or run mutagen daemon stop, remove <path> from PATH and run offbox setup.`
+- `Fix: Retry offbox setup, or install Mutagen 0.18.x on PATH.`
+- `Fix: Clear <directory> and retry, or install Mutagen 0.18.x on PATH.`
+- `Fix: Install Mutagen 0.18.x on PATH.`
+- `Fix: OpenSSH >=8.0 is required. <install command>` The install command depends on the system: `xcode-select --install`, `brew install openssh`, `sudo apt install git openssh-client` or `sudo dnf install git openssh-clients`.
 - `Fix: Install OpenTofu >=1.8 on PATH.`
 - `Fix: Install OpenTofu >=1.8 or Terraform >=1.6.`
-- `Fix: Install git >=2.30.`
+- `Fix: git >=2.30 is required. <install command>`
 - `Fix: Remove <archive> and retry, or install OpenTofu on PATH.`
 - `Fix: Check connectivity and try again.`
 - `Fix: Check subprocess pipe support and retry.`
@@ -72,8 +78,12 @@ Check `offbox doctor` first. Mutagen is a separate installation. OpenTofu downlo
 - `Fix: Supply a command to run.`
 - `Fix: Check connectivity with offbox host ssh <selected>.`
 - `Fix: Correct the reported problem and retry offbox doctor.`
+- `Fix: Run offbox setup.` No default host is configured yet.
 - `Fix: Create the host or choose a registered host.`
 - `Fix: Generate <key> or load it with ssh-add <key>.`
+- `Fix: Run ssh-keygen -t ed25519 -N "" -C offbox -f ~/.ssh/offbox_ed25519, then rerun offbox setup.`
+- `Fix: Run ssh-keygen -t ed25519 -N "" -C offbox -f ~/.ssh/offbox_ed25519, or pass --ssh-key PATH.`
+- `Fix: Create <directory> with mode 0700 and retry.`
 - `Fix: Check the command output and try again.`
 
 ## Hosts and providers
@@ -87,7 +97,7 @@ Keep a failed host’s copied provider workspace so `host destroy` can clean up 
 - `Fix: Generate the key or load it with ssh-add <key>.`
 - `Fix: Regenerate <path> and load the matching key with ssh-add <key>.`
 - `Fix: Regenerate <sidecar> with ssh-keygen -y -f <key>.`
-- `Fix: Run offbox host create or offbox host use NAME.`
+- `Fix: Run offbox setup, or offbox host use NAME.`
 - `Fix: Run offbox host list or create this host.`
 - `Fix: Wait for that operation to finish, then retry.`
 - `Fix: Check state directory permissions and ssh-keygen.`
@@ -102,7 +112,9 @@ Keep a failed host’s copied provider workspace so `host destroy` can clean up 
 - `Fix: Correct the reported problem and rerun the same host init command; its registration was retained.`
 - `Fix: Correct the ssh provider manifest.`
 - `Fix: Inspect the existing directory or choose another name.`
-- `Fix: Review the host fingerprint and pass --accept-host-key.`
+- `Fix: Pass --host-key-fingerprint SHA256:... from ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server.`
+- `Fix: Verify the server identity with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server before retrying.` The scanned key does not match `--host-key-fingerprint`; do not retry with `--accept-host-key` until you know why.
+- `Fix: Pass the SHA256:... value printed by ssh-keygen -lf on the server.`
 - `Fix: Verify the fingerprint and rerun offbox host init.`
 - `Fix: Verify the server identity before changing its stored host key.`
 - `Fix: Install OpenTofu or Terraform and retry.`
@@ -226,7 +238,6 @@ Resolve conflicting files locally, then reset the exact session identifier shown
 - `Fix: Run mutagen sync terminate <session>, then offbox up to apply the new configuration.`
 - `Fix: Run offbox up to resume source sync.`
 - `Fix: Set sync.ignore to nonempty, single-line patterns without NUL characters.`
-- `Fix: Wait for other sync operations and retry offbox up.`
 
 ## Ports and SSH masters
 
@@ -298,10 +309,12 @@ Do not terminate an unrelated local service just because it holds a preferred po
 - `Fix: Run offbox up before reading stack logs.`
 - `Fix: Pass --action check, --action create or --action init.`
 - `Fix: Pass --provider hetzner, --provider gcp or --provider ssh.`
-- `Fix: Pass --provider ssh --action init --target USER@ADDRESS --accept-host-key.`
+- `Fix: Pass --provider ssh --action init --target USER@ADDRESS --host-key-fingerprint SHA256:...`
 - `Fix: Run offbox doctor and follow its Fix lines.`
 - `Fix: Pass --provider hetzner, --provider gcp or --provider ssh with an explicit --action.`
 - `Fix: Set GOOGLE_PROJECT before retrying.`
+- `Fix: export HCLOUD_TOKEN=... in your shell profile, or set token under [hetzner] in <credentials> (chmod 600); see <installation guide>#hetzner` See [Hetzner](installation.md#hetzner).
+- `Fix: export GOOGLE_PROJECT=your-project-id and run gcloud auth application-default login; see <installation guide>#google-cloud` See [Google Cloud](installation.md#google-cloud).
 - `Fix: Use --provider ssh --action init --target USER@ADDRESS.`
 - `Fix: Use --provider ssh --action init.`
 - `Fix: Check directory permissions and rerun offbox uninstall --yes.`

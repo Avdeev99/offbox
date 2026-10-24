@@ -13,8 +13,13 @@ from offbox.runtime import Runtime
 
 def ports(
     ctx: typer.Context,
-    json: Annotated[bool, typer.Option("--json")] = False,
-    swap: Annotated[int | None, typer.Option("--swap", min=1, max=65535)] = None,
+    json: Annotated[bool, typer.Option("--json", help="Emit a typed JSON report.")] = False,
+    swap: Annotated[
+        int | None,
+        typer.Option(
+            "--swap", min=1, max=65535, help="Give this worktree localhost:PORT for remote PORT, swapping with its current owner."
+        ),
+    ] = None,
 ) -> None:
     """Restore this worktree's port forwards and show its localhost mappings."""
     runner: object = ctx.find_root().obj

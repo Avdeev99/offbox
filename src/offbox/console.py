@@ -1,12 +1,13 @@
 import os
 import sys
 
+import typer
 from pydantic import BaseModel
 from rich.console import Console
 
 
 def _human(message: str, style: str = "") -> None:
-    Console(stderr=True, no_color="NO_COLOR" in os.environ or not sys.stderr.isatty()).print(
+    Console(stderr=True, soft_wrap=True, no_color="NO_COLOR" in os.environ or not sys.stderr.isatty()).print(
         message, style=style, markup=False, highlight=False
     )
 
@@ -48,6 +49,14 @@ def step(message: str) -> None:
 
 def command(message: str) -> None:
     _human(f"$ {message}", "dim")
+
+
+def interactive() -> bool:
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
+def confirm(message: str) -> bool:
+    return bool(typer.confirm(message, default=True, err=True))
 
 
 def json_out(model: BaseModel) -> None:

@@ -62,7 +62,7 @@ Recognized root Compose filenames are `compose.yaml`, `compose.yml`, `docker-com
 
 `up` explicitly runs the install stage. Later `exec` calls rerun it only when its stored ordered hash changes. The marker lives outside source at `/srv/offbox/envs/<env>/.offbox/install.sha256`; see [the hash and coordination contract](agents.md#dependency-installation). `exec --no-sync` uses the already-synced remote files without a hidden flush.
 
-A custom Dockerfile image is cached by project-path and Dockerfile-content hashes. Other build-context changes alone do not invalidate this cache. An existing container retains its image until `up --fresh`; that command replaces its Docker data volume while keeping synchronized code.
+A custom Dockerfile image is cached by project-path and Dockerfile-content hashes. Other build-context changes alone do not invalidate this cache. An existing container retains its image until `up --fresh`; that command replaces its Docker data volume while keeping synchronized code, so it asks for confirmation on a terminal and needs `--yes` otherwise.
 
 ### Sync and environment variables
 
@@ -107,7 +107,7 @@ ssh_key = "~/.ssh/id_ed25519"
 | `hosts.NAME.port` | `22` | Accepted existing-host port field; pass `--port` explicitly to `host init` when different from 22. |
 | `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519` | Local private-key path used by `host create`. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
 
-`host init` does not load host presets. Pass `USER@ADDRESS`, any nondefault `--port`, and `--ssh-key` explicitly, for example `offbox host init dev@192.0.2.10 --name home --port 2222 --ssh-key ~/.ssh/home --accept-host-key`.
+`host init` does not load host presets. Pass `USER@ADDRESS`, any nondefault `--port`, and `--ssh-key` explicitly, for example `offbox host init dev@192.0.2.10 --name home --port 2222 --ssh-key ~/.ssh/home --host-key-fingerprint SHA256:...`.
 
 A registered environment always uses its recorded host. Changing the default does not move it. Remove that environment before selecting another host with `up --host NAME`.
 

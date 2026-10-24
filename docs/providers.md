@@ -4,7 +4,7 @@ Offbox includes `hetzner` and `gcp` for a new Ubuntu 24.04 VM, and `ssh` for an 
 
 ## Hetzner Cloud
 
-Set `HCLOUD_TOKEN` in the environment, or put `hetzner.token` in the XDG configuration directory's `offbox/credentials.toml` with permissions `0600`. Tokens are passed to the provider through its environment. They are never written to the project configuration, tfvars, registry or logs.
+Set `HCLOUD_TOKEN` in the environment, or put `hetzner.token` in the XDG configuration directory's `offbox/credentials.toml` with permissions `0600`; [installation](installation.md#hetzner) shows how to create the token. Tokens are passed to the provider through its environment. They are never written to the project configuration, tfvars, registry or logs.
 
 ```sh
 offbox host create main --provider hetzner --size ccx33 --region fsn1
@@ -42,11 +42,16 @@ Provider project/authentication values are environment/ADC settings, not Terrafo
 
 ## Existing SSH server
 
+On the server, print the Ed25519 host key fingerprint, then pass it to `host init` (or `offbox setup --provider ssh --action init --target dev@192.0.2.10 --host-key-fingerprint ...`):
+
 ```sh
-offbox host init dev@192.0.2.10 --name home --port 22 --accept-host-key
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+offbox host init dev@192.0.2.10 --name home --port 22 --host-key-fingerprint SHA256:...
 ```
 
-The connecting account needs noninteractive sudo. Offbox displays the server's Ed25519 fingerprint for confirmation on a terminal; noninteractive use requires `--accept-host-key`. Verify that fingerprint through a trusted channel. Subsequent connections use the pinned host key and the `offbox` account.
+The connecting account needs noninteractive sudo. Offbox scans the server's Ed25519 key and stops before any change if its fingerprint differs from `--host-key-fingerprint`. Without that flag, a terminal shows the fingerprint for confirmation; noninteractive use then requires `--accept-host-key`, which trusts the scanned key unverified and prints a warning. Obtain the fingerprint through a trusted channel such as the provider console. Subsequent connections use the pinned host key and the `offbox` account.
+
+Offbox's generated SSH configuration (included at the top of `~/.ssh/config`) and the bootstrap connection set `IdentitiesOnly yes`, `ForwardAgent no` and `ForwardX11 no` for offbox hosts. OpenSSH keeps the first value it reads, so a later `Host *` block cannot enable agent or X11 forwarding to the host, and only the configured key is offered.
 
 Existing-host bootstrap sets `OFFBOX_HARDEN=0`. It installs the offbox account, passwordless sudo, Docker and the required directories/network. It preserves the owner's account, SSH settings, UFW settings and existing security-service configuration. UID 1000 must be available or already belong to `offbox`; a conflicting account produces an actionable error before changes. Existing conflicting Docker packages or a different Docker CE major also require a manual migration before bootstrap.
 
@@ -57,6 +62,8 @@ The shared network is `10.89.0.0/16`; an existing network named `offbox` with a 
 Built-in providers ship inside the wheel. A provider folder under `$XDG_CONFIG_HOME/offbox/providers/<name>` overrides a built-in provider of the same name. See [the provider contract](writing-a-provider.md).
 
 Before provisioning, offbox copies the selected provider into the host's state workspace and records its hash. Destroy uses this copy, so later edits to a provider do not change the teardown instructions. Failed provisioning or destroy keeps the workspace for recovery. Do not delete it while its remote resources still exist. Cloud destroy runs `tofu init` before `tofu destroy`, so it works after the plugin cache under `~/.cache/offbox` is cleared or an initial `init` failed. It also proceeds when local Mutagen or SSH master cleanup fails, printing what to stop manually.
+
+Source sync uses Mutagen 0.18.x from `PATH`, or else the verified Mutagen 0.18.1 that `offbox setup` downloads into `~/.cache/offbox/tools/mutagen/0.18.1/`. All Mutagen binaries of a user share one daemon; after switching between Mutagen versions, run `mutagen daemon stop` so the next command starts a matching daemon.
 
 Pressing Ctrl-C during `tofu apply` or `destroy` forwards the interrupt and waits, without a deadline, for OpenTofu to record what it created. A second Ctrl-C only warns. A third force-stops OpenTofu: resources created since its last state save are then untracked, so check the provider console for resources labelled `offbox-host=NAME` after running `offbox host destroy NAME`. If `state.json` becomes unreadable, restore `state.json.bak`, the copy taken before the last write, or run the printed `tofu -chdir=<workspace> destroy` command for each workspace under `hosts/*/tofu`.
 

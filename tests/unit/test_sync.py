@@ -1,5 +1,6 @@
 import json
 import subprocess
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,8 +10,10 @@ from fakes import FakeRunner, Script
 from offbox.config import SyncConfig
 from offbox.errors import CommandFailed, PreconditionError
 from offbox.naming import Worktree
+from offbox.runner import Result
 from offbox.state import HostState
 from offbox.sync import DEFAULT_IGNORES, Endpoint, IgnoreConfig, Permissions, SyncManager, SyncSession, create_command, health
+from offbox.tools import MutagenMissing, mutagen_directory
 
 
 def work_and_host() -> tuple[Worktree, HostState]:
@@ -83,20 +86,57 @@ def test_exact_create_command() -> None:
     assert runner.calls[1].argv == expected
 
 
+def test_warm_flush_uses_label_flush_then_one_health_listing() -> None:
+    work, host = work_and_host()
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "flush"]), listing(session())])
+    SyncManager(runner).flush(work, host)
+    assert [call.argv for call in runner.calls] == [
+        ["mutagen", "sync", "flush", "--label-selector", "offbox-env=app-abcd"],
+        ["mutagen", "sync", "list", "--label-selector", "offbox-env=app-abcd", "--template", "{{ json . }}"],
+    ]
+    assert runner.calls[0].timeout == 120
+
+
 def test_paused_session_resumed_before_flush_by_identifier() -> None:
     work, host = work_and_host()
     paused = session().model_copy(update={"paused": True, "status": "disconnected"})
     runner = FakeRunner(
-        [listing(paused), Script(prefix=["mutagen", "sync", "resume"]), Script(prefix=["mutagen", "sync", "flush"]), listing(session())]
+        [
+            Script(prefix=["mutagen", "sync", "flush", "--label-selector"], returncode=1, stderr="session is paused"),
+            listing(paused),
+            Script(prefix=["mutagen", "sync", "resume"]),
+            Script(prefix=["mutagen", "sync", "flush"]),
+            listing(session()),
+        ]
     )
     SyncManager(runner).flush(work, host)
     assert [call.argv[2:] for call in runner.calls] == [
+        ["flush", "--label-selector", "offbox-env=app-abcd"],
         ["list", "--label-selector", "offbox-env=app-abcd", "--template", "{{ json . }}"],
         ["resume", "sync_owned"],
         ["flush", "sync_owned"],
         ["list", "--label-selector", "offbox-env=app-abcd", "--template", "{{ json . }}"],
     ]
-    assert runner.calls[2].timeout == 120
+    assert runner.calls[3].timeout == 120
+
+
+def test_failed_label_flush_reports_conflicts_without_flushing_again() -> None:
+    work, host = work_and_host()
+    value = session()
+    value.excluded_conflicts = 2
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "flush"], returncode=1, stderr="halted"), listing(value)])
+    with pytest.raises(PreconditionError, match="2 conflicts") as caught:
+        SyncManager(runner).flush(work, host)
+    assert caught.value.fix is not None and caught.value.fix.startswith("Resolve sync conflicts locally")
+    assert len(runner.calls) == 2
+
+
+def test_failed_label_flush_without_session_has_fix() -> None:
+    work, host = work_and_host()
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "flush"], returncode=1, stderr="no sessions"), listing()])
+    with pytest.raises(PreconditionError, match="No source sync session") as caught:
+        SyncManager(runner).flush(work, host)
+    assert caught.value.fix == "Run offbox up in this worktree."
 
 
 @pytest.mark.parametrize("action", ["pause", "terminate"])
@@ -198,16 +238,23 @@ def test_disconnected_can_recover_through_flush() -> None:
     value.status = "disconnected"
     value.last_error = "synthetic connection failure"
     value.beta.connected = False
-    runner = FakeRunner([listing(value), Script(prefix=["mutagen", "sync", "flush"]), listing(session())])
+    runner = FakeRunner(
+        [
+            Script(prefix=["mutagen", "sync", "flush"], returncode=1, stderr="disconnected"),
+            listing(value),
+            Script(prefix=["mutagen", "sync", "flush"]),
+            listing(session()),
+        ]
+    )
     SyncManager(runner).flush(work, host)
-    assert runner.calls[1].argv == ["mutagen", "sync", "flush", "sync_owned"]
+    assert runner.calls[2].argv == ["mutagen", "sync", "flush", "sync_owned"]
 
 
 def test_post_flush_problem_prevents_success() -> None:
     work, host = work_and_host()
     value = session()
     value.beta.connected = False
-    runner = FakeRunner([listing(session()), Script(prefix=["mutagen", "sync", "flush"]), listing(value)])
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "flush"]), listing(value)])
     with pytest.raises(PreconditionError, match="Source sync is watching"):
         SyncManager(runner).flush(work, host)
 
@@ -215,7 +262,7 @@ def test_post_flush_problem_prevents_success() -> None:
 def test_flush_missing_session_has_fix() -> None:
     work, host = work_and_host()
     with pytest.raises(PreconditionError, match="No source sync session") as caught:
-        SyncManager(FakeRunner([listing()])).flush(work, host)
+        SyncManager(FakeRunner([Script(prefix=["mutagen", "sync", "flush"]), listing()])).flush(work, host)
     assert caught.value.fix == "Run offbox up in this worktree."
 
 
@@ -288,3 +335,81 @@ def test_linked_git_file_ignore_cannot_be_overridden_by_project_negation_or_dedu
         str(work.root),
         f"offbox-{host.name}:{work.work}",
     ]
+
+
+class MissingPathRunner(FakeRunner):
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        check: bool = True,
+        capture: bool = True,
+        input: str | None = None,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+        timeout: float | None = None,
+        interruptible: bool = False,
+    ) -> Result:
+        if argv[0] == "mutagen":
+            try:
+                raise FileNotFoundError(2, "No such file or directory", "mutagen")
+            except FileNotFoundError as exc:
+                raise PreconditionError("Cannot run mutagen", "Install mutagen and check its permissions.") from exc
+        return super().run(argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible)
+
+
+def cached_install(cache: Path) -> Path:
+    directory = mutagen_directory(cache)
+    directory.mkdir(parents=True)
+    (directory / "mutagen-agents.tar.gz").write_bytes(b"agents")
+    executable = directory / "mutagen"
+    executable.write_bytes(b"binary")
+    return executable
+
+
+def test_missing_path_mutagen_uses_verified_cache(tmp_path: Path) -> None:
+    work, host = work_and_host()
+    executable = str(cached_install(tmp_path))
+    runner = MissingPathRunner(
+        [Script(prefix=[executable, "sync", "flush"]), Script(prefix=[executable, "sync", "list"], stdout=payload(session()))]
+    )
+    SyncManager(runner, cache=tmp_path, offer=lambda _message: pytest.fail("a cached binary needs no download")).flush(work, host)
+    assert [call.argv[0] for call in runner.calls] == [executable, executable]
+
+
+def test_missing_mutagen_without_tty_fails_with_setup_fix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    work, host = work_and_host()
+    monkeypatch.setattr("offbox.sync.console.interactive", lambda: False)
+    with pytest.raises(MutagenMissing) as caught:
+        SyncManager(MissingPathRunner(), cache=tmp_path).flush(work, host)
+    assert caught.value.fix == "Run offbox setup to download Mutagen, or install Mutagen 0.18.x."
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_missing_mutagen_offers_verified_download_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    work, host = work_and_host()
+    prompts: list[str] = []
+    installs: list[Path] = []
+
+    def install(cache: Path) -> Path:
+        installs.append(cache)
+        return cached_install(cache)
+
+    def offer(message: str) -> bool:
+        prompts.append(message)
+        return True
+
+    monkeypatch.setattr("offbox.sync.install_mutagen", install)
+    executable = str(mutagen_directory(tmp_path) / "mutagen")
+    runner = MissingPathRunner(
+        [Script(prefix=[executable, "sync", "flush"]), Script(prefix=[executable, "sync", "list"], stdout=payload(session()))]
+    )
+    SyncManager(runner, cache=tmp_path, offer=offer).flush(work, host)
+    assert prompts == [f"Mutagen 0.18.1 not found. Download it (verified) into {mutagen_directory(tmp_path)}?"]
+    assert installs == [tmp_path]
+
+
+def test_cleanup_without_mutagen_never_offers_download(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    work, host = work_and_host()
+    SyncManager(MissingPathRunner(), cache=tmp_path, offer=lambda _message: pytest.fail("cleanup must not download")).terminate(work, host)
+    assert "Mutagen is not installed; continuing cleanup without sync terminate." in capsys.readouterr().err
