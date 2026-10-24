@@ -413,16 +413,21 @@ def test_create_refreshes_bootstrap_login_and_checks_docker_before_ready(
 
 
 def test_none_driver_removes_only_offbox_resources_in_order() -> None:
+    import json
     from datetime import UTC, datetime
 
     from offbox.drivers.none import NoneDriver
     from offbox.state import HostState
 
+    labels = {"offbox.env": "feature", "offbox.worktree": "/worktree"}
     runner = FakeRunner(
         [
             Script(prefix=["ssh"], stdout="abcdef012345\n"),
-            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], stdout=json.dumps([{"Id": "abcdef012345", "Name": "/offbox-feature", "Config": {"Labels": labels}}])),
             Script(prefix=["ssh"], stdout="offbox-feature-docker\n"),
+            Script(prefix=["ssh"], stdout=json.dumps([{"Name": "offbox-feature-docker", "Labels": labels}])),
+            Script(prefix=["ssh"], stdout='[{"Name":"offbox","Labels":{"offbox.managed":"1"}}]'),
+            Script(prefix=["ssh"]),
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"]),
@@ -439,11 +444,14 @@ def test_none_driver_removes_only_offbox_resources_in_order() -> None:
     )
     NoneDriver(runner, host).destroy()
     assert [call.argv[-1] for call in runner.calls] == [
-        "docker ps -aq --filter label=offbox.env",
-        "docker rm -f abcdef012345",
-        "docker volume ls -q --filter 'name=^offbox-'",
-        "docker volume rm offbox-feature-docker",
+        "docker ps -aq --no-trunc --filter label=offbox.env",
+        "docker container inspect abcdef012345",
+        "docker volume ls -q --filter label=offbox.env",
+        "docker volume inspect offbox-feature-docker",
         "docker network inspect offbox",
+        "docker ps -aq --no-trunc --filter network=offbox",
+        "docker rm -f abcdef012345",
+        "docker volume rm offbox-feature-docker",
         "docker network rm offbox",
         "sudo -n rm -rf /srv/offbox /var/lib/offbox",
     ]
@@ -776,7 +784,7 @@ def test_existing_host_destroy_keeps_state_when_recreated_master_cannot_close(tm
             Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
             Script(prefix=["ssh", "offbox-main"]),
             Script(prefix=["ssh", "offbox-main"]),
-            Script(prefix=["ssh", "offbox-main"], returncode=1),
+            Script(prefix=["ssh", "offbox-main"], returncode=1, stderr="network offbox not found"),
             Script(prefix=["ssh", "offbox-main"]),
             Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=200)"),
             Script(prefix=["ssh", "-O", "exit"], returncode=255, stderr="Master refused termination request"),

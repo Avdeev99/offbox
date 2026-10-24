@@ -86,6 +86,8 @@ An `offbox.toml` at the Git worktree root configures resources, dependency insta
 | [Coder](https://coder.com/docs/admin/templates/managing-templates) | Developer workspaces created from Terraform templates. |
 | [Agent sandbox APIs, such as E2B](https://docs.e2b.dev/) | Isolated execution environments created and controlled through SDKs/APIs. |
 
+See [repository safeguards and fork contributions](docs/repository-safety.md) and [private vulnerability reporting](SECURITY.md).
+
 ## Development and validation
 
 ```sh

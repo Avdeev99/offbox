@@ -310,6 +310,10 @@ class Executor:
                     if state.number is None and process.poll() is None:
                         process.kill()
         if status == 255:
+            cleanup = shlex.join(
+                ["offbox", "host", "ssh", host.name, "--", "docker", "exec", work.container, "offbox-run", "--signal", "TERM", run_id]
+            )
+            fix = f"Completion is unknown; do not retry blindly. Check offbox status; stop this run if needed: {cleanup}"
             try:
                 master = self.runner.run(["ssh", "-O", "check", f"offbox-{host.name}"], check=False, timeout=2)
                 if master.returncode == 0:
@@ -317,8 +321,8 @@ class Executor:
                     if confirmed_status is not None:
                         return confirmed_status
             except OffboxError as exc:
-                raise ConnectionError_("SSH connection lost before command completion was confirmed", _CONNECTION_FIX) from exc
-            raise ConnectionError_("SSH connection lost before command completion was confirmed", _CONNECTION_FIX)
+                raise ConnectionError_("SSH connection lost before command completion was confirmed", fix) from exc
+            raise ConnectionError_("SSH connection lost before command completion was confirmed", fix)
         return status if status >= 0 else 128 - status
 
     def _remote(self, host: HostState, argv: Sequence[str], *, input: str | None = None, timeout: float = 30) -> str:
@@ -440,7 +444,7 @@ class Executor:
         if not options.no_sync:
             runtime.sync.flush(work, host)
         self.install(work, host, project.install, env=env)
-        with host_operation(self.paths, host.name):
+        with host_operation(self.paths, host.name, wait_timeout=120, clock=self.clock):
             runtime.ports.restore(work, host, project.ports)
         with stage("Command execution"):
             return self.run(

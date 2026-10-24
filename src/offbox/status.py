@@ -291,7 +291,7 @@ class Status:
 
             def ports() -> StatusCheck:
                 try:
-                    with host_operation(self.runtime.paths, host.name):
+                    with host_operation(self.runtime.paths, host.name, wait_timeout=120, clock=self.runtime.clock):
                         self.report.ports = self.runtime.ports.restore(work, host, project.ports)
                 except OffboxError:
                     current = self.runtime.store.read().envs.get(work.name)

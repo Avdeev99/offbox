@@ -50,7 +50,7 @@ The connecting account needs noninteractive sudo. Offbox displays the server's E
 
 Existing-host bootstrap sets `OFFBOX_HARDEN=0`. It installs the offbox account, passwordless sudo, Docker and the required directories/network. It preserves the owner's account, SSH settings, UFW settings and existing security-service configuration. UID 1000 must be available or already belong to `offbox`; a conflicting account produces an actionable error before changes. Existing conflicting Docker packages or a different Docker CE major also require a manual migration before bootstrap.
 
-The shared network is `10.89.0.0/16`; an existing network named `offbox` with a different subnet is rejected. Bootstrap preserves unrelated containers and volumes. Destroying a registered SSH host removes offbox environments and owned host directories but retains Docker and the `offbox` user.
+The shared network is `10.89.0.0/16`; an existing network named `offbox` with a different subnet is rejected. Bootstrap preserves unrelated containers and volumes. Destroying a registered SSH host validates container/volume ownership labels before deletion and removes owned host directories, while retaining Docker and the `offbox` user. New Offbox networks carry `offbox.managed=1`; adopted or older unlabelled networks are preserved during destruction. A managed network referenced by unrelated running or stopped containers is refused before any owned resources are deleted; inspect its members with `offbox host ssh NAME -- docker ps -a --filter network=offbox` before resolving the conflict.
 
 ## Provider workspaces and recovery
 

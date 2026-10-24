@@ -5,6 +5,8 @@ from pathlib import Path
 
 from offbox.config import UserConfig, default_host, load_config
 from offbox.errors import PreconditionError
+from offbox.host.ready import Clock, SystemClock
+from offbox.locking import acquire_lock
 from offbox.paths import Paths
 from offbox.providers import validate_name
 from offbox.runner import Runner
@@ -65,7 +67,7 @@ def public_key(runner: Runner, key: Path) -> str:
 
 
 @contextmanager
-def host_operation(paths: Paths, name: str) -> Generator[None]:
+def host_operation(paths: Paths, name: str, *, wait_timeout: float = 0, clock: Clock | None = None) -> Generator[None]:
     validate_name(name)
     directory = paths.state / "host-locks"
     try:
@@ -74,12 +76,13 @@ def host_operation(paths: Paths, name: str) -> Generator[None]:
     except OSError as exc:
         raise PreconditionError("Cannot open host operation lock", "Check state directory permissions.") from exc
     with handle:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise PreconditionError(
-                f"A lifecycle operation is already running for {name}", "Wait for that operation to finish, then retry."
-            ) from exc
+        acquire_lock(
+            handle.fileno(),
+            timeout=wait_timeout,
+            clock=clock or SystemClock(),
+            message=f"A lifecycle operation is already running for {name}",
+            fix="Wait for that operation to finish, then retry.",
+        )
         try:
             yield
         finally:

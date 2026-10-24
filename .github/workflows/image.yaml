@@ -5,6 +5,8 @@ on:
     paths:
       - images/universal/**
       - .github/workflows/image.yaml
+      - .github/workflows/image-build.yaml
+      - .dockerignore
       - src/offbox/__init__.py
   push:
     branches: [master]
@@ -12,6 +14,8 @@ on:
     paths:
       - images/universal/**
       - .github/workflows/image.yaml
+      - .github/workflows/image-build.yaml
+      - .dockerignore
       - src/offbox/__init__.py
 
 permissions:
@@ -23,113 +27,18 @@ concurrency:
 
 jobs:
   image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/image-build.yaml
+    with:
+      publish: false
+
+  publish:
+    if: github.event_name == 'push'
     permissions:
       contents: read
       packages: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: ShellCheck
-        run: shellcheck images/universal/offbox-init images/universal/offbox-run
-      - name: Image tags
-        id: tags
-        env:
-          PYTHONPATH: src
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-          from offbox import DEFAULT_IMAGE
-
-          repository, series = DEFAULT_IMAGE.rsplit(":", 1)
-          tags = [DEFAULT_IMAGE, f"{repository}:sha-{os.environ['GITHUB_SHA'][:7]}"]
-          if os.environ["GITHUB_REF_TYPE"] == "tag":
-              version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
-              if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
-                  raise SystemExit("Expected a semantic version tag")
-              tags.append(f"{repository}:{version}")
-              if version == "0.1.0":
-                  tags.append(f"{repository}:{series}.0.0")
-          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-              output.write("tags<<IMAGE_TAGS\n" + "\n".join(tags) + "\nIMAGE_TAGS\n")
-          PY
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build amd64 image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: images/universal/Dockerfile
-          platforms: linux/amd64
-          tags: ${{ steps.tags.outputs.tags }}
-          outputs: |
-            type=oci,dest=${{ runner.temp }}/offbox-image.tar
-            ${{ github.event_name != 'pull_request' && 'type=image,push=true' || '' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Report compressed image size
-        env:
-          IMAGE_ARCHIVE: ${{ runner.temp }}/offbox-image.tar
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import tarfile
-          from pathlib import Path
-
-          with tarfile.open(os.environ["IMAGE_ARCHIVE"]) as archive:
-              index_file = archive.extractfile("index.json")
-              if index_file is None:
-                  raise SystemExit("OCI index is missing")
-              pending = list(json.load(index_file)["manifests"])
-              size = None
-              while pending:
-                  descriptor = pending.pop()
-                  digest = descriptor["digest"].split(":", 1)[1]
-                  manifest_file = archive.extractfile(f"blobs/sha256/{digest}")
-                  if manifest_file is None:
-                      raise SystemExit("OCI manifest is missing")
-                  manifest = json.load(manifest_file)
-                  if "manifests" in manifest:
-                      pending.extend(manifest["manifests"])
-                      continue
-                  platform = descriptor.get("platform")
-                  if platform is None:
-                      config_digest = manifest["config"]["digest"].split(":", 1)[1]
-                      config_file = archive.extractfile(f"blobs/sha256/{config_digest}")
-                      if config_file is None:
-                          raise SystemExit("OCI image configuration is missing")
-                      platform = json.load(config_file)
-                  if platform.get("architecture") != "amd64" or platform.get("os") != "linux":
-                      continue
-                  layers = {layer["digest"]: layer["size"] for layer in manifest["layers"]}
-                  size = sum(layers.values()) + manifest["config"]["size"]
-                  break
-              if size is None:
-                  raise SystemExit("linux/amd64 OCI image manifest is missing")
-          report = (
-              "## Universal image build\n\n"
-              f"Commit: `{os.environ['GITHUB_SHA']}`\n\n"
-              f"Compressed linux/amd64 image content: **{size:,} bytes ({size / 1_000_000_000:.3f} GB)**.\n\n"
-              "Measured from compressed OCI layer descriptors plus image configuration, excluding attestations.\n\n"
-              + ("Within the 3 GB target.\n" if size < 3_000_000_000 else "Above the 3 GB target; review image contents.\n")
-              + "\nThe build does not run containers or validate nested Docker/signals.\n"
-          )
-          Path("image-size.md").write_text(report)
-          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as summary:
-              summary.write(report)
-          PY
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: image-size
-          path: image-size.md
-          if-no-files-found: error
+    uses: ./.github/workflows/image-build.yaml
+    with:
+      publish: true

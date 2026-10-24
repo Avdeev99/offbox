@@ -24,7 +24,7 @@ def ports(
     runtime = Runtime(paths, runner)
     work, _env, host = runtime.current()
     config = load_config(work.root / "offbox.toml", ProjectConfig)
-    with host_operation(paths, host.name):
+    with host_operation(paths, host.name, wait_timeout=120, clock=runtime.clock):
         report = runtime.ports.restore(work, host, config.ports)
     if swap is not None:
         report = runtime.ports.swap(work, swap)

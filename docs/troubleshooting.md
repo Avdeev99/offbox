@@ -344,3 +344,9 @@ These instructions can arrive through SSH from the packaged host/image scripts. 
 - `Fix: Flush sync and check that the remote directory exists.`
 - `Fix: Review the bootstrap log and retry after resolving the failure.`
 - `Fix: Check the privileged container settings and dockerd log.`
+
+## SSH loss during a command
+
+Exit 4 can mean command completion is unknown, even if the remote command is still running. Do not retry non-idempotent work blindly. The error includes the run ID and a scoped `offbox-run --signal TERM` cleanup command; inspect the environment and use that command only when you want to stop that run. A confirmed remote exit 255 still returns 255.
+
+A contended routine host operation waits up to 120 seconds, and forwarding waits up to 30 seconds. A timeout retains exclusive locking and asks you to retry after the competing operation finishes. Same-environment dependency installation and destructive lifecycle conflicts still fail immediately.

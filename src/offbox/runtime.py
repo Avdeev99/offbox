@@ -240,7 +240,7 @@ fi
             _GUARD
             + """
 if [ -n "$container_id" ] && [ "$(docker container inspect --format '{{.State.Running}}' "$container")" = true ]; then
-    docker stop "$container" >/dev/null
+    docker stop --timeout 30 "$container" >/dev/null
 fi
 """
         )
@@ -249,7 +249,7 @@ fi
         + """
 if [ -n "$container_id" ]; then docker rm -f "$container" >/dev/null; fi
 if [ -n "$volume_name" ]; then docker volume rm "$volume" >/dev/null; fi
-rm -rf -- "$directory"
+sudo -n rm -rf -- "$directory"
 """
     )
 
@@ -261,7 +261,7 @@ class Runtime:
         self.clock = clock or SystemClock()
         self.store = StateStore(paths.state)
         self.sync = SyncManager(runner)
-        self.ports = PortManager(paths, runner)
+        self.ports = PortManager(paths, runner, clock=self.clock)
 
     def remote(self, host: HostState, argv: Sequence[str], *, check: bool = True, timeout: float = 30, input: str | None = None) -> Result:
         result = self.runner.run(ssh_argv(host.name, argv), check=False, timeout=timeout, input=input)
@@ -353,7 +353,7 @@ class Runtime:
         if previous is not None and host_name is not None and previous.host != host_name:
             raise PreconditionError("Environment is registered on another host", "Remove it before selecting a different host.")
         host = self._host(previous.host if previous is not None else host_name)
-        with host_operation(self.paths, host.name):
+        with host_operation(self.paths, host.name, wait_timeout=120, clock=self.clock):
             self.remote(host, ["test", "-f", "/var/lib/offbox/ready"], timeout=5)
             resource_result = self.remote(host, ["docker", "info", "--format", '{"cpus":{{.NCPU}},"memory":{{.MemTotal}}}'])
             try:

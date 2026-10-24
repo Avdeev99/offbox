@@ -1,5 +1,7 @@
 # Contributing
 
+Open a pull request from a fork for changes; no cloud credentials are needed. Fork CI requires maintainer approval before it runs. See [repository safeguards](docs/repository-safety.md) and [private security reporting](SECURITY.md).
+
 ## Development
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Python 3.12 or newer, then run:
@@ -53,8 +55,8 @@ The maintainer must configure a [pending trusted publisher](https://docs.pypi.or
    | Workflow filename | `release.yaml` |
    | Environment name | `pypi` |
 
-3. In the repository's GitHub Settings → Environments, create `pypi`. Restrict deployments to release tags matching `v*`; optionally add required reviewers.
-4. Ensure GitHub Actions is enabled. The release workflow requests `id-token: write` for OIDC and `contents: write` for the GitHub release. No PyPI API token or password is needed.
+3. The `pypi` environment is restricted to `v*` tags. Review its approval policy and explicitly update the release-tag ruleset that currently blocks those tags before resuming publication.
+4. Ensure GitHub Actions is enabled. Only the artifact-consuming publish job requests `id-token: write` for OIDC and `contents: write` for the GitHub release; build/test jobs use read-only permissions. No PyPI API token or password is needed.
 
 For later releases, manage the publisher under the existing PyPI project's Publishing settings. See [PyPI's trusted-publisher documentation](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
 

@@ -108,9 +108,11 @@ def test_lost_connection_is_exit_four_when_no_confirmed_status(tmp_path: Path) -
         [Script(prefix=["ssh"], method="start_stream", returncode=255), Script(prefix=["ssh", "-O", "check"], returncode=1)]
     )
     with pytest.raises(ConnectionError_) as caught:
-        Executor(paths(tmp_path), runner).run(work, host, ["true"])
+        Executor(paths(tmp_path), runner, id_factory=lambda: "a" * 32).run(work, host, ["true"])
     assert caught.value.exit_code == 4
-    assert caught.value.fix == "offbox status"
+    assert caught.value.fix is not None and "Completion is unknown" in caught.value.fix
+    assert "offbox-run --signal TERM " + "a" * 32 in caught.value.fix
+    assert "do not retry blindly" in caught.value.fix
 
 
 def test_env_values_are_scoped_and_explicit_values_override() -> None:
