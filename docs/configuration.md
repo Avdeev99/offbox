@@ -105,7 +105,7 @@ ssh_key = "~/.ssh/id_ed25519"
 | `hosts.NAME.image` | Provider default | Cloud operating-system image, distinct from `env.image`; Hetzner defaults to `ubuntu-24.04`. |
 | `hosts.NAME.address` | Unset | Accepted existing-host address field; `host init` requires its target explicitly and does not read this preset. |
 | `hosts.NAME.port` | `22` | Accepted existing-host port field; pass `--port` explicitly to `host init` when different from 22. |
-| `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519` | Local private-key path used by `host create`. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
+| `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519`, or `~/.ssh/offbox_ed25519` when only that key exists | Local private-key path used by `host create`; `host init` uses the same default. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
 
 `host init` does not load host presets. Pass `USER@ADDRESS`, any nondefault `--port`, and `--ssh-key` explicitly, for example `offbox host init dev@192.0.2.10 --name home --port 2222 --ssh-key ~/.ssh/home --host-key-fingerprint SHA256:...`.
 

@@ -41,7 +41,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Interrupting provisioning no longer kills OpenTofu mid-apply; Ctrl-C after a VM exists prints the `host destroy` command and exits 130.
 - An unreadable state file reports the backup and the manual `tofu destroy` commands for each provider workspace.
 - Generated SSH configuration disables agent and X11 forwarding and offers only the configured key, so user-wide `Host *` settings no longer apply to offbox hosts; `host init` quotes the known-hosts path.
-- Every `--env` and `exec.env` value is redacted from logs and verbose output, regardless of the variable name.
+- Every `--env` and `exec.env` value is redacted from logs and verbose output as `NAME=value`, regardless of the variable name; secret-named and long values are also redacted on their own.
 - `exec` no longer waits for another worktree's `up`, concurrent `exec` calls in one worktree wait for a running installation instead of failing, and port-restore errors no longer prevent the command from running.
 - Closing the terminal relays termination to the remote command instead of orphaning it.
 - Concurrent invocations no longer fail while pruning old log files; `logs --follow` reads incrementally.
@@ -61,6 +61,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Public contribution workflows use restricted credentials and publication jobs; release tags remain blocked while publishing is deferred.
 - Batched port discovery streams large responses instead of passing them as process arguments; empty install markers report the correct recovery action.
 - Cloud host creation refreshes early SSH connections and verifies Docker access before reporting readiness, so bootstrap's Docker-group changes take effect.
+- `up` no longer holds the host lock while waiting for another installation, a busy host lock no longer prints a port-restore warning during `exec`, and an interrupted `exec` waits at most one second for port restore.
+- `up` no longer reports a settings change for containers created before settings were recorded; `host create` and `host init` default to `~/.ssh/offbox_ed25519` when `~/.ssh/id_ed25519` is missing, matching `setup`.
+- The installer prints the PATH line to add when it cannot update the shell profile, finds uv in `UV_INSTALL_DIR` or `XDG_BIN_HOME`, and reports an unfinished `offbox setup` without failing.
 - Execution combines dependency hash/marker reads and owned-container/Compose port discovery into fresh probes, removing two sequential SSH round trips without skipping checks.
 
 ## [0.1.0] - 2026-10-23
