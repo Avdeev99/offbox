@@ -191,6 +191,8 @@ Install commands and declared hash files are explicit configuration. A failed in
 - `Fix: Check local state directory permissions and retry.`
 - `Fix: Check the host sha256sum command and retry.`
 - `Fix: Configure exec.env as environment variable names.`
+- `Fix: Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value.`
+- `Fix: Review exec.env in offbox.toml, then run offbox up to approve it.`
 - `Fix: Remove the conflicting install lock and retry.`
 - `Fix: Remove the host .offbox/install.sha256 marker and retry.`
 - `Fix: Restore an owned directory at <directory>.`
@@ -261,10 +263,18 @@ Do not terminate an unrelated local service just because it holds a preferred po
 - `Fix: Run offbox ports in the affected worktrees before retrying --swap.`
 - `Fix: Run offbox up and check the environment's Docker/Compose configuration.`
 - `Fix: Run offbox up before restoring ports.`
+- `Fix: Run offbox up before swapping ports.`
 - `Fix: Run offbox up in the correct worktree.`
 - `Fix: Stop a competing local listener or remove unused offbox port mappings.`
 - `Fix: Stop that local listener before retrying the swap.`
 - `Fix: Wait for that operation and retry offbox ports.`
+
+`exec` reports port-restore problems as warnings after starting the command; the command's exit status is unaffected:
+
+- `Fix: run offbox ports after it finishes; the next offbox exec also restores them.`
+- `Fix: run offbox ports to finish restoring them.`
+- `Fix: check offbox logs and run offbox ports.`
+- `Fix: list the ports you need in ports.forward in offbox.toml.`
 
 ## Health reports
 
