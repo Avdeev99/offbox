@@ -101,9 +101,15 @@ def setup(
     )
 
 
-def uninstall(ctx: typer.Context, yes: Annotated[bool, typer.Option("--yes")] = False) -> None:
+def uninstall(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option("--yes")] = False,
+    abandon_cloud_hosts: Annotated[
+        bool, typer.Option("--abandon-cloud-hosts", help="Remove local records even though cloud hosts keep running and billing.")
+    ] = False,
+) -> None:
     """Remove local offbox resources while retaining user configuration and remote hosts."""
-    run_uninstall(Paths.discover(), _runner(ctx), yes=yes)
+    run_uninstall(Paths.discover(), _runner(ctx), yes=yes, abandon_cloud_hosts=abandon_cloud_hosts)
 
 
 def register(app: typer.Typer) -> None:

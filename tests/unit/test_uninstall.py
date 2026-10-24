@@ -301,3 +301,80 @@ def test_ssh_include_write_failure_after_directory_cleanup_can_be_retried(tmp_pa
     assert include_line(paths).encode() not in ssh_config.read_bytes()
     assert not (paths.config / "ssh_config").exists()
     assert runner.scripts == []
+
+
+def _add_cloud_host(paths: Paths, *, address: str = "198.51.100.7") -> HostState:
+    workspace = paths.state / "hosts/cloud/tofu"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="hetzner"\ndescription="cloud"\ndriver="tofu"\n')
+    host = HostState(
+        name="cloud",
+        provider="hetzner",
+        address=address,
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+    )
+    with StateStore(paths.state).transaction() as state:
+        state.hosts[host.name] = host
+    return host
+
+
+def test_uninstall_yes_refuses_while_cloud_hosts_remain(tmp_path: Path) -> None:
+    paths, ssh_config = context(tmp_path)
+    host = _add_cloud_host(paths)
+    runner = FakeRunner()
+    with pytest.raises(PreconditionError) as caught:
+        uninstall(paths, runner, yes=True, ssh_config=ssh_config)
+    assert caught.value.message == (
+        "Cloud hosts remain and keep billing after uninstall: cloud (hetzner, 198.51.100.7, label offbox-host=cloud)"
+    )
+    assert caught.value.fix == (
+        "Run offbox host destroy cloud --yes first, or add --abandon-cloud-hosts to keep them running without local records."
+    )
+    assert StateStore(paths.state).read().hosts["cloud"] == host
+    assert paths.cache.is_dir()
+    assert runner.calls == []
+
+
+def test_uninstall_without_yes_points_cloud_users_to_the_abandon_flag(tmp_path: Path) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    _add_cloud_host(paths, address="")
+    with pytest.raises(PreconditionError) as caught:
+        uninstall(paths, FakeRunner(), ssh_config=ssh_config)
+    assert caught.value.fix == "Run offbox host destroy cloud first, or offbox uninstall --yes --abandon-cloud-hosts to retain the hosts."
+
+
+def test_uninstall_abandons_cloud_hosts_only_with_explicit_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    _add_cloud_host(paths)
+    runner = FakeRunner(
+        [
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
+        ]
+    )
+    uninstall(paths, runner, yes=True, abandon_cloud_hosts=True, ssh_config=ssh_config)
+    assert not paths.state.exists()
+    err = " ".join(capsys.readouterr().err.split())
+    assert "Abandoning cloud host cloud (hetzner, 198.51.100.7, label offbox-host=cloud)" in err
+
+
+def test_uninstall_cli_passes_the_abandon_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+    from offbox.runner import Runner
+
+    paths, _ssh_config = context(tmp_path, host=False)
+    seen: list[tuple[bool, bool]] = []
+
+    def run_uninstall(_paths: Paths, _runner: Runner, *, yes: bool = False, abandon_cloud_hosts: bool = False) -> None:
+        seen.append((yes, abandon_cloud_hosts))
+
+    monkeypatch.setattr("offbox.cli.misc.Paths.discover", lambda: paths)
+    monkeypatch.setattr("offbox.cli.misc.run_uninstall", run_uninstall)
+    result = CliRunner().invoke(app, ["uninstall", "--yes", "--abandon-cloud-hosts"])
+    assert result.exit_code == 0
+    assert seen == [(True, True)]
