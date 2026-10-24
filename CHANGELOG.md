@@ -15,6 +15,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Existing-host teardown validates resource ownership and preserves adopted networks; environment cleanup handles root-owned source directories.
+- Environment shutdown forwards signals to dockerd and waits within the outer stop deadline.
+- Routine command and forwarding lock contention uses bounded waits; unconfirmed SSH completion includes per-run recovery guidance.
+- Public contribution workflows use restricted credentials and publication jobs; release tags remain blocked while publishing is deferred.
+
 - Batched port discovery streams large responses instead of passing them as process arguments; empty install markers report the correct recovery action.
 - Cloud host creation refreshes early SSH connections and verifies Docker access before reporting readiness, so bootstrap's Docker-group changes take effect.
 - Execution combines dependency hash/marker reads and owned-container/Compose port discovery into fresh probes, removing two sequential SSH round trips without skipping checks.

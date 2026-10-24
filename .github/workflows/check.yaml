@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.13.0"
@@ -38,7 +40,7 @@ jobs:
           if ((${#shell_files[@]})); then
             shellcheck "${shell_files[@]}"
           else
-            echo 'No shell scripts yet; host and image scripts arrive in milestones 2 and 3.'
+            echo 'No shell scripts found.'
           fi
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
@@ -46,6 +48,7 @@ jobs:
           terraform_wrapper: false
       - name: Provider schemas and mocked GCP contracts (no cloud credentials)
         run: |
+          terraform fmt -check -recursive providers
           terraform -chdir=providers/hetzner init -backend=false -input=false
           terraform -chdir=providers/hetzner validate
           terraform -chdir=providers/gcp init -backend=false -input=false

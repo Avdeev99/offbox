@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from offbox.config import Model, PortsConfig
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
 from offbox.host import host_operation
+from offbox.host.ready import Clock, SystemClock
+from offbox.locking import acquire_lock
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.runner import Result, Runner
@@ -148,10 +150,13 @@ def forwarding_command(action: Literal["forward", "cancel"], spec: ForwardSpec) 
 class PortManager:
     """Restore/cancel callers hold host_operation; swap acquires its own host locks."""
 
-    def __init__(self, paths: Paths, runner: Runner, probe: Callable[[int], bool] = loopback_available) -> None:
+    def __init__(
+        self, paths: Paths, runner: Runner, probe: Callable[[int], bool] = loopback_available, *, clock: Clock | None = None
+    ) -> None:
         self.paths = paths
         self.runner = runner
         self.probe = probe
+        self.clock = clock or SystemClock()
         self.store = StateStore(paths.state)
 
     @contextmanager
@@ -162,10 +167,13 @@ class PortManager:
         except OSError as exc:
             raise PreconditionError("Cannot open port operation lock", "Check the offbox state directory permissions.") from exc
         with handle as lock:
-            try:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise PreconditionError("Another port operation is running", "Wait for that operation and retry offbox ports.") from exc
+            acquire_lock(
+                lock.fileno(),
+                timeout=30,
+                clock=self.clock,
+                message="Another port operation is running",
+                fix="Wait for that operation and retry offbox ports.",
+            )
             try:
                 yield
             finally:

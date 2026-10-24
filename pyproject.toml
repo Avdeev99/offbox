@@ -47,7 +47,7 @@ exclude = [
 include = [
     "/src", "/tests", "/host", "/images", "/providers", "/docs", "/examples",
     "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE",
-    "/CONTRIBUTING.md", "/CHANGELOG.md", "/AGENTS.md", "/Makefile",
+    "/CONTRIBUTING.md", "/SECURITY.md", "/.dockerignore", "/CHANGELOG.md", "/AGENTS.md", "/Makefile",
     "/.pre-commit-config.yaml", "/RTK.md",
 ]
 

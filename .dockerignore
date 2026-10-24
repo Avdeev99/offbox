@@ -1,0 +1,10 @@
+**
+!images/
+!images/universal/
+!images/universal/Dockerfile
+!images/universal/offbox-init
+!images/universal/offbox-run
+!tests/
+!tests/smoke/
+!tests/smoke/Dockerfile
+!tests/smoke/host.sh

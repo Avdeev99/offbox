@@ -171,7 +171,7 @@ if docker network inspect offbox >/dev/null 2>&1; then
     subnet=$(docker network inspect --format '{{(index .IPAM.Config 0).Subnet}}' offbox)
     [ "$subnet" = 10.89.0.0/16 ] || fail 'The existing offbox network has a different subnet.' 'Remove the conflicting offbox network after reviewing its attached containers.'
 else
-    docker network create --subnet 10.89.0.0/16 offbox
+    docker network create --label offbox.managed=1 --subnet 10.89.0.0/16 offbox
 fi
 install -d -m 0750 -o offbox -g offbox /srv/offbox/envs
 if [ ! -e /var/lib/offbox/lock ]; then
