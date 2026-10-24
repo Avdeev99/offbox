@@ -12,10 +12,10 @@ On a Google Cloud `e2-standard-4` VM, a warm `offbox exec -- true` took a median
 
 ## Quickstart
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Mutagen 0.18.x, then install offbox from this repository:
+macOS, Linux, or Windows via WSL2 · git and ssh — `offbox setup` installs the rest.
 
 ```sh
-brew install mutagen-io/mutagen/mutagen   # macOS; on Linux use https://github.com/mutagen-io/mutagen/releases
+curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install git+https://github.com/Avdeev99/offbox
 offbox setup
 cd your-repo
@@ -24,7 +24,7 @@ offbox exec -- pytest
 offbox ports
 ```
 
-`setup` checks tools and offers a new Hetzner/Google Cloud host or an existing SSH server. Creating a cloud host requires your own account and credentials. Review its size and current price before approving creation. Existing-host initialization needs Ubuntu 24.04, passwordless sudo and UID 1000 available; see [providers](docs/providers.md).
+`setup` checks your tools, downloads verified Mutagen and OpenTofu when they are missing, offers a dedicated SSH key if you have none, and then creates a Hetzner or Google Cloud host in your own account or registers an existing Ubuntu 24.04 server. Cloud credentials come from your environment, never from a prompt. Creating a cloud host is billable; review its size and current price before approving. The [installation guide](docs/installation.md) walks through each platform and provider step by step.
 
 When finished with a worktree, use `offbox rm --yes`. To delete a cloud host and stop its server charges:
 
@@ -76,7 +76,7 @@ Use DevPod or Codespaces if you want a full remote editor environment defined by
 
 ## Requirements and scope
 
-- macOS or Linux client, Python 3.12+, Git 2.30+, OpenSSH 8+ and Mutagen 0.18.x. Windows clients use WSL2.
+- macOS or Linux client, Python 3.12+, Git 2.30+, OpenSSH 8+ and Mutagen 0.18.x; `offbox setup` downloads a verified Mutagen 0.18.1 if none is installed. Windows clients use WSL2.
 - An Ubuntu 24.04 amd64 host. The universal image is Linux amd64; an Apple Silicon laptop is supported as a client.
 - OpenTofu 1.8+ or Terraform 1.6+ for cloud provisioning. If neither is installed, Offbox can download verified pinned OpenTofu.
 - Trusted personal projects. Environment containers are privileged and share the host kernel; they are not a sandbox for untrusted code. Two-way sync also lets code on the VM change files in your worktree. Read the [security model](docs/security.md).
@@ -93,7 +93,7 @@ See [limits](docs/limits.md) for the full operating model.
 
 **Can I use another cloud?** The built-in providers are Hetzner, Google Cloud and existing SSH servers. Any Ubuntu 24.04 amd64 server works through `ssh`, and you can add an OpenTofu/Terraform provider; see [writing a provider](docs/writing-a-provider.md).
 
-**Does it support Windows?** Use WSL2 as the client.
+**Does it support Windows?** Use WSL2 as the client; see [Windows (WSL2)](docs/installation.md#windows-wsl2).
 
 **Do I need a devcontainer?** No. Offbox runs your existing Compose files in the universal image. Set `env.image` or `env.dockerfile` in `offbox.toml` to use your own image.
 
@@ -105,7 +105,7 @@ An `offbox.toml` at the Git worktree root configures resources, dependency insta
 - [Vite + Playwright](examples/node-playwright/): a small web app and browser test, with port 3000.
 - [Agent instructions and JSON contracts](docs/agents.md).
 - [Architecture and lifecycle](docs/architecture.md).
-- [Providers](docs/providers.md), [writing a provider](docs/writing-a-provider.md), and [troubleshooting](docs/troubleshooting.md).
+- [Installation](docs/installation.md), [providers](docs/providers.md), [writing a provider](docs/writing-a-provider.md), and [troubleshooting](docs/troubleshooting.md).
 
 ## Contributing
 
