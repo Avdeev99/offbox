@@ -21,7 +21,7 @@ make test
 | `make test` | Deterministic unit tests; excludes the subprocess marker |
 | `uv build` | Build the source distribution and wheel |
 
-Unit CI covers Ubuntu and macOS with Python 3.12 and 3.13. Validation also runs lint, strict type checks, distribution builds, ShellCheck, provider schema validation with mocked Terraform tests, image builds and one focused native Linux Docker smoke job. Do not add real-cloud tests or require real cloud credentials for tests. Cloud API provisioning and VM bootstrap are not exercised by CI; browser, OOM and performance tests are outside its scope.
+Unit CI covers Ubuntu and macOS with Python 3.12 and 3.13. Validation also runs lint, strict type checks, distribution builds, ShellCheck, provider schema validation with mocked Terraform and OpenTofu tests, image builds and one focused native Linux Docker smoke job. Do not add real-cloud tests or require real cloud credentials for tests. Cloud API provisioning and VM bootstrap are not exercised by CI; browser, OOM and performance tests are outside its scope.
 
 Provider checks run without cloud credentials:
 
@@ -35,7 +35,7 @@ terraform -chdir=providers/gcp validate
 terraform -chdir=providers/gcp test
 ```
 
-Each provider commits a `.terraform.lock.hcl` covering Linux and macOS on amd64/arm64. After changing a provider version constraint, refresh it with `terraform providers lock` for those four platforms.
+Each provider commits a `.terraform.lock.hcl` covering Linux and macOS on amd64/arm64. The file holds entries for both `registry.terraform.io` and `registry.opentofu.org`; `init` drops the other tool's entry, so restore the file before committing. After changing a provider version constraint, refresh both entries with `terraform providers lock` and `tofu providers lock` for `linux_amd64`, `linux_arm64`, `darwin_amd64` and `darwin_arm64`, then combine them. CI checks providers with both Terraform and OpenTofu.
 
 Separately approved [Hetzner](docs/benchmarks/2026-10-23-hetzner.md) and [Google Cloud](docs/benchmarks/2026-10-23-gcp.md) benchmarks exercised provisioning and both sample apps, including browser tests, then verified cloud cleanup. Measurements and comparison limits are recorded in the reports.
 
@@ -54,7 +54,7 @@ uvx pre-commit run --all-files
 
 Read [AGENTS.md](AGENTS.md) for code rules. Use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`) and keep each PR focused on one change, targeting `master`. Describe what changed and how you verified it, including the commands you ran and relevant output. Run `make check` and `make test` before pushing. Never commit secrets. Tests never need real credentials or billable cloud resources.
 
-The repository keeps host scripts, image files and provider definitions at the root. Hatch force-includes them in wheels under `offbox/_data/host`, `offbox/_data/images` and `offbox/_data/providers`; runtime code must use `importlib.resources` to locate them. The universal image is built separately from the Python wheel.
+The repository keeps host scripts, image files and provider definitions at the root. Hatch maps them into wheels under `offbox/_data/host`, `offbox/_data/images` and `offbox/_data/providers`, excluding local `.terraform/` directories, state files, editor swap files and provider tests; runtime code must use `importlib.resources` to locate them. The universal image is built separately from the Python wheel.
 
 ## Future one-time PyPI setup
 
