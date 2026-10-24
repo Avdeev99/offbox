@@ -6,10 +6,12 @@ import socket
 from collections.abc import Callable, Generator, Sequence
 from contextlib import ExitStack, contextmanager
 from ipaddress import IPv4Address
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from offbox import console
 from offbox.config import Model, PortsConfig
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
 from offbox.host import host_operation
@@ -23,6 +25,8 @@ from offbox.state import EnvState, HostState, State, StateStore
 from offbox.timings import measured
 
 logger = logging.getLogger(__name__)
+AUTO_FORWARD_LIMIT = 32
+COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
 
 
 class DockerModel(BaseModel):
@@ -108,6 +112,10 @@ class ForwardSpec(Model):
     @property
     def value(self) -> str:
         return f"127.0.0.1:{self.local}:{self.ip}:{self.remote}"
+
+
+def compose_discovery(root: Path, config: PortsConfig) -> bool:
+    return config.auto and any((root / name).is_file() for name in COMPOSE_FILES)
 
 
 def parse_compose(text: str) -> list[int]:
@@ -219,6 +227,8 @@ class PortManager:
             pid = master_pid(self.runner, host.name)
         if pid is None and start:
             raise ConnectionError_(f"SSH master for {host.name} is unavailable", "Check SSH connectivity and retry offbox ports.")
+        if not created and self._host(self.store.read(), host).control_master_pid == pid:
+            return pid
         with self.store.transaction() as state:
             stored = self._host(state, host)
             if created or stored.control_master_pid != pid:
@@ -245,25 +255,50 @@ class PortManager:
             ) from exc
         return self._container_ip(work, containers)
 
+    def _owned_container(self, work: Worktree, containers: Sequence[PortContainer]) -> PortContainer:
+        if len(containers) != 1:
+            raise PreconditionError(
+                "Invalid managed container network", "Inspect the offbox network and container ownership before retrying."
+            )
+        container = containers[0]
+        labels = container.config.labels or {}
+        if (
+            container.name.lstrip("/") != work.container
+            or labels.get("offbox.env") != work.name
+            or labels.get("offbox.worktree") != str(work.root)
+        ):
+            raise PreconditionError(
+                "Invalid managed container network", "Inspect the offbox network and container ownership before retrying."
+            )
+        return container
+
     def _container_ip(self, work: Worktree, containers: Sequence[PortContainer]) -> IPv4Address:
+        container = self._owned_container(work, containers)
+        if not container.state.running:
+            raise PreconditionError("Environment is not running", "Run offbox up before restoring ports.")
         try:
-            if len(containers) != 1:
-                raise ValueError("Expected one managed container")
-            container = containers[0]
-            labels = container.config.labels or {}
-            if (
-                container.name.lstrip("/") != work.container
-                or labels.get("offbox.env") != work.name
-                or labels.get("offbox.worktree") != str(work.root)
-            ):
-                raise ValueError("Conflicting container ownership")
-            if not container.state.running:
-                raise PreconditionError("Environment is not running", "Run offbox up before restoring ports.")
             return ipaddress.IPv4Address(container.network.networks["offbox"].ip)
         except (ValueError, KeyError) as exc:
             raise PreconditionError(
                 "Invalid managed container network", "Inspect the offbox network and container ownership before retrying."
             ) from exc
+
+    def _snapshot(self, work: Worktree, host: HostState) -> PortSnapshot | None:
+        result = self.runner.run(ssh_argv(host.name, ["docker", "container", "inspect", work.container]), check=False, timeout=15)
+        if result.returncode == 255:
+            raise ConnectionError_(f"Cannot reach host {host.name}", f"Check offbox host ssh {host.name} and retry.")
+        if result.returncode and "no such" in result.stderr.lower():
+            return None
+        self._checked(result, "Run offbox up and check the environment's Docker/Compose configuration.")
+        try:
+            containers = TypeAdapter(list[PortContainer]).validate_json(result.stdout)
+        except ValidationError as exc:
+            raise PreconditionError(
+                "Invalid managed container network", "Inspect the offbox network and container ownership before retrying."
+            ) from exc
+        if not self._owned_container(work, containers).state.running:
+            return None
+        return PortSnapshot(containers=containers, compose="")
 
     def _discovery(self, work: Worktree, host: HostState) -> tuple[IPv4Address, list[int]]:
         result = self._remote(host, ["sh", "-s", "--", work.name, str(work.root), work.container], input=PORT_DISCOVERY_SCRIPT, timeout=30)
@@ -370,21 +405,41 @@ class PortManager:
             ]
         )
 
-    def _restore(self, work: Worktree, host: HostState, config: PortsConfig) -> PortsReport:
+    def _automatic(self, discovered: Sequence[int], config: PortsConfig, env: EnvState, warn: Callable[[str], None]) -> list[int]:
+        candidates = sorted(set(discovered) - set(config.forward))
+        if len(candidates) <= AUTO_FORWARD_LIMIT:
+            return candidates
+        kept = sorted(candidates, key=lambda port: (port not in env.local_ports, port))[:AUTO_FORWARD_LIMIT]
+        skipped = sorted(set(candidates) - set(kept))
+        warn(
+            f"Skipped {len(skipped)} Compose ports beyond the automatic limit of {AUTO_FORWARD_LIMIT}: "
+            + ", ".join(str(port) for port in skipped)
+            + ". Fix: list the ports you need in ports.forward in offbox.toml."
+        )
+        return sorted(kept)
+
+    def _restore(
+        self,
+        work: Worktree,
+        host: HostState,
+        config: PortsConfig,
+        snapshot: PortSnapshot | None = None,
+        warn: Callable[[str], None] = console.warn,
+    ) -> PortsReport:
         self._env(self.store.read(), work, host)
         ip = None
-        ports = set(config.forward)
-        if config.auto and any(
-            (work.root / name).is_file() for name in ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
-        ):
-            ip, discovered = self._discovery(work, host)
-            ports.update(discovered)
-        desired = sorted(ports)
+        discovered: list[int] = []
+        if compose_discovery(work.root, config):
+            if snapshot is None:
+                ip, discovered = self._discovery(work, host)
+            else:
+                discovered = parse_compose(snapshot.compose)
         current = self._env(self.store.read(), work, host)
+        desired = sorted({*config.forward, *self._automatic(discovered, config, current, warn)})
         if not desired and not current.local_ports:
             return self.report(current)
         if ip is None:
-            ip = self._ip(work, host)
+            ip = self._container_ip(work, snapshot.containers) if snapshot is not None else self._ip(work, host)
         pid = self._master(host)
         if pid is None:
             raise ConnectionError_("SSH master is unavailable", "Run offbox ports again after checking SSH connectivity.")
@@ -402,9 +457,18 @@ class PortManager:
         return self.report(self._env(self.store.read(), work, host))
 
     @measured("Port forwarding")
-    def restore(self, work: Worktree, host: HostState, config: PortsConfig) -> PortsReport:
+    def restore(
+        self,
+        work: Worktree,
+        host: HostState,
+        config: PortsConfig,
+        *,
+        snapshot: PortSnapshot | None = None,
+        warn: Callable[[str], None] = console.warn,
+    ) -> PortsReport:
+        """Reconcile forwards; a snapshot from the caller's preflight replaces the remote inspection."""
         with self._operation():
-            return self._restore(work, host, config)
+            return self._restore(work, host, config, snapshot, warn)
 
     def cancel(self, work: Worktree, host: HostState) -> None:
         with self._operation():
@@ -467,13 +531,19 @@ class PortManager:
                 targets = {selected.name: selected}
                 if owner:
                     targets[owner[0].name] = owner[0]
+                stopped: str | None = None
                 for env in targets.values():
                     host = snapshot.hosts.get(env.host)
                     if host is None:
                         raise PreconditionError("Port owner has no registered host", "Restore its host registration before swapping ports.")
-                    self._restore(
-                        Worktree(root=env.worktree_path, name=env.name), host, PortsConfig(forward=list(env.local_ports), auto=False)
-                    )
+                    target = Worktree(root=env.worktree_path, name=env.name)
+                    containers = self._snapshot(target, host)
+                    if containers is None and env.name == selected.name:
+                        raise PreconditionError("Environment is not running", "Run offbox up before swapping ports.")
+                    if containers is None:
+                        stopped = env.name
+                        continue
+                    self._restore(target, host, PortsConfig(forward=list(env.local_ports), auto=False), containers)
                 state = self.store.read()
                 current = state.envs[work.name]
                 if current.local_ports[remote] == remote:
@@ -486,10 +556,16 @@ class PortManager:
                     )
                 old = [self._spec(current, remote)]
                 new = [old[0].model_copy(update={"local": remote})]
-                if owner:
+                parked: tuple[str, int] | None = None
+                if owner and stopped is None:
                     other = self._spec(state.envs[owner[0].name], owner[1])
                     old.append(other)
                     new.append(other.model_copy(update={"local": old[0].local}))
+                elif owner:
+                    parked = (owner[0].name, owner[1])
+                    idle = state.envs[owner[0].name]
+                    if idle.forward_ip is not None and owner[1] in idle.active_forwards:
+                        old.append(self._spec(idle, owner[1]))
                 self._set_pair_active(old, [])
                 installed: list[ForwardSpec] = []
                 try:
@@ -500,7 +576,7 @@ class PortManager:
                         self._checked(result, "Run offbox ports in both worktrees and retry the swap.")
                         installed.append(spec)
                     with self.store.transaction() as state:
-                        for before, after in zip(old, new, strict=True):
+                        for before, after in zip(old[: len(new)], new, strict=True):
                             committed = state.envs.get(before.env)
                             if (
                                 committed is None
@@ -513,6 +589,14 @@ class PortManager:
                                 )
                             committed.local_ports[after.remote] = after.local
                             committed.active_forwards = sorted({*committed.active_forwards, after.remote})
+                        if parked is not None:
+                            parked_env = state.envs.get(parked[0])
+                            if parked_env is None or parked_env.local_ports.get(parked[1]) != remote:
+                                raise PreconditionError(
+                                    "Port owner changed during swap", "Run offbox ports in both worktrees to recover the listeners."
+                                )
+                            parked_env.local_ports[parked[1]] = old[0].local
+                            parked_env.active_forwards = [value for value in parked_env.active_forwards if value != parked[1]]
                 except OffboxError as exc:
                     failures = self._rollback(old, installed)
                     detail = "Original mappings restored." if not failures else "Recovery incomplete: " + "; ".join(failures)
