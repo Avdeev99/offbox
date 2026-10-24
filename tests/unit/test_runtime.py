@@ -283,14 +283,13 @@ def test_up_records_actual_image_and_keeps_atomic_remote_lock(tmp_path: Path, fr
     runner = FakeRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
             Script(prefix=["ssh"], stdout=old),
             Script(prefix=["ssh"], stdout=container_json(root, name)),
             Script(prefix=["ssh"]),
         ]
     )
-    runner.scripts.insert(4, Script(prefix=["ssh"]))
+    runner.scripts.insert(3, Script(prefix=["ssh"]))
     runner.scripts.extend(sync_ready_scripts(root, name, fresh=fresh))
     env = Runtime(paths, runner, FakeClock()).up(cwd=root, fresh=fresh)
     assert env.image_digest == "sha256:actual-image"
@@ -319,7 +318,6 @@ def test_up_failed_creation_retains_recoverable_registration(tmp_path: Path) -> 
     runner = FakeRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
             Script(prefix=["ssh"], returncode=1, stderr="Error: No such container"),
             Script(prefix=["ssh"], returncode=125, stderr="image pull failed"),
@@ -340,7 +338,6 @@ def test_up_existing_foreign_container_refuses_before_mutation(tmp_path: Path) -
     runner = FakeRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
             Script(prefix=["ssh"], stdout=container_json(root, name, labels_root="/different/worktree")),
         ]
@@ -391,8 +388,8 @@ def test_readiness_timeout_uses_fake_clock_and_logs_diagnostics(tmp_path: Path) 
     runtime = Runtime(paths, runner, clock)
     container = ContainerInfo.model_validate(json.loads(container_json(root, work.name))[0])
     with pytest.raises(PreconditionError, match="did not become ready"):
-        runtime.wait_ready(host, work, container, timeout=2)
-    assert clock.elapsed == 2
+        runtime.wait_ready(host, work, container, timeout=0.4)
+    assert clock.elapsed == pytest.approx(0.4)
     assert runner.calls[-2].argv[-1] == f"docker logs --tail 40 {work.container}"
     assert runner.calls[-1].argv[-1] == f"docker exec {work.container} tail -n 40 /var/log/dockerd.log"
 
@@ -446,7 +443,7 @@ def test_stopped_container_old_ready_marker_requires_live_daemon(tmp_path: Path)
     )
     clock = FakeClock()
     Runtime(paths, runner, clock).wait_ready(host, work, ContainerInfo.model_validate(json.loads(container_json(root, work.name))[0]))
-    assert clock.elapsed == 1
+    assert clock.elapsed == pytest.approx(0.2)
     assert (
         runner.calls[0].argv[-1]
         == f"docker exec {work.container} sh -c 'test -f /run/offbox/ready && docker --host=unix:///var/run/docker.sock info >/dev/null 2>&1'"
@@ -544,9 +541,9 @@ def test_readiness_inspection_timeout_stays_within_deadline(tmp_path: Path, monk
         Runtime(paths, runner, clock).wait_ready(
             host, work, ContainerInfo.model_validate(json.loads(container_json(root, work.name))[0]), timeout=2
         )
-    assert clock.elapsed == 2
+    assert clock.elapsed == pytest.approx(2)
     inspection = next(call for call in calls if "container inspect" in call[0][-1])
-    assert inspection[1] == 1
+    assert inspection[1] == pytest.approx(1.8)
     assert "docker logs --tail 40" in calls[-2][0][-1]
 
 
@@ -563,7 +560,6 @@ def test_invalid_fresh_settings_preserve_existing_registration(tmp_path: Path) -
     runner = FakeRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
         ]
     )
@@ -661,7 +657,6 @@ def custom_up_runner(root: Path, name: str, *, fresh: bool = False, build_fails:
     return FakeRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
             Script(prefix=["ssh"], stdout=container_json(root, name)),
             Script(prefix=["ssh"]),
@@ -757,7 +752,6 @@ def test_fresh_sync_preflight_failure_preserves_existing_resources(tmp_path: Pat
     runner = FakeRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
             Script(prefix=["ssh"], stdout=container_json(root, name)),
             Script(prefix=["ssh"]),
@@ -815,7 +809,6 @@ def test_up_restores_ports_after_stack_and_fresh_cancels_before_replacement(
     runner = FakeRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout='{"cpus":8,"memory":16000000000}'),
             Script(prefix=["ssh"], stdout=container_json(root, name)),
             Script(prefix=["ssh"]),
@@ -981,7 +974,7 @@ def test_lifecycle_revalidation_ignores_master_identity_but_checks_host_configur
         state.envs[name] = EnvState(name=name, host=host.name, worktree_path=root, created_at=datetime.now(UTC))
 
     @contextmanager
-    def changed_master(selected: Paths, host_name: str) -> Generator[None]:
+    def changed_master(selected: Paths, host_name: str, *, wait_timeout: float = 0, clock: FakeClock | None = None) -> Generator[None]:
         with host_operation(selected, host_name):
             with StateStore(paths.state).transaction() as state:
                 if changed_field == "control_master_pid":

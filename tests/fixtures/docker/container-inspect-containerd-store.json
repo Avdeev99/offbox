@@ -1,0 +1,17 @@
+[
+	{
+		"Name": "/offbox-project-abcd",
+		"Image": "sha256:4c3f1e0d9b8a7f6e5d4c3b2a1908f7e6d5c4b3a29180f7e6d5c4b3a2918070f6",
+		"State": {
+			"Running": true,
+			"Status": "running"
+		},
+		"Config": {
+			"Image": "ghcr.io/avdeev99/offbox-universal:1",
+			"Labels": {
+				"offbox.env": "project-abcd",
+				"offbox.worktree": "/src/project"
+			}
+		}
+	}
+]

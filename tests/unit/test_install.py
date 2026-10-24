@@ -187,7 +187,6 @@ def test_up_stages_order_mise_install_stack_and_forwards_configured_env(tmp_path
     runner = FakeRunner(
         [
             Script(prefix=["ssh"], method="start_stream"),
-            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + "a" * 64 + "\n"),
             Script(prefix=["ssh"], method="start_stream"),
             Script(prefix=["ssh"], stdout="b" * 64 + "  -\n"),
             Script(prefix=["ssh"]),
