@@ -6,6 +6,7 @@ from offbox.config import Credentials, Model, ProjectConfig, UserConfig, default
 from offbox.errors import OffboxError, PreconditionError
 from offbox.paths import Paths
 from offbox.runner import Runner
+from offbox.ssh import default_ssh_key
 from offbox.state import State, StateStore
 from offbox.tools import ToolDiscovery
 
@@ -100,7 +101,7 @@ def diagnose(
         report.checks.append(Check(name="state", ok=True, message="State validates"))
     except OffboxError as exc:
         report.checks.append(_failure("state", exc))
-    key = Path.home() / ".ssh/id_ed25519"
+    key = default_ssh_key()
     configured_key = False
     if user is not None and state is not None:
         selected = default_host(user, state.default_host)

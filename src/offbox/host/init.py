@@ -18,7 +18,7 @@ from offbox.host.ready import Clock, tcp_probe, wait_ready
 from offbox.paths import Paths
 from offbox.providers import copy_provider, discover_provider, validate_name
 from offbox.runner import Runner
-from offbox.ssh import ensure_include, known_host, quote_path, sync_config, validate_address, validate_user, write_private
+from offbox.ssh import default_ssh_key, ensure_include, known_host, quote_path, sync_config, validate_address, validate_user, write_private
 from offbox.state import HostState, StateStore
 
 
@@ -63,7 +63,7 @@ def _init_host(
     owner, address = options.target.split("@", 1)
     validate_user(owner)
     address = validate_address(address.strip("[]"))
-    key = (options.ssh_key or Path.home() / ".ssh/id_ed25519").expanduser().resolve()
+    key = (options.ssh_key or default_ssh_key()).expanduser().resolve()
     scan = runner.run(["ssh-keyscan", "-T", "5", "-p", str(options.port), "-t", "ed25519", address], timeout=10)
     keys = {
         " ".join(line.split()[1:3])

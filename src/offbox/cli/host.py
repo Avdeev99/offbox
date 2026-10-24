@@ -85,7 +85,9 @@ def create(
     provider: Annotated[str | None, typer.Option("--provider", help="Cloud provider: hetzner, gcp or a custom provider name.")] = None,
     size: Annotated[str | None, typer.Option("--size", help="Provider machine type, for example ccx33 or e2-standard-4.")] = None,
     region: Annotated[str | None, typer.Option("--region", help="Provider location or zone, for example fsn1 or us-east4-c.")] = None,
-    ssh_key: Annotated[Path | None, typer.Option("--ssh-key", help="Private SSH key for the host. Default: ~/.ssh/id_ed25519.")] = None,
+    ssh_key: Annotated[
+        Path | None, typer.Option("--ssh-key", help="Private SSH key for the host. Default: ~/.ssh/id_ed25519, else ~/.ssh/offbox_ed25519.")
+    ] = None,
 ) -> None:
     """Provision a VM and wait for its bootstrap to complete."""
     from offbox.host.create import CreateOptions, create_host
@@ -109,7 +111,10 @@ def init(
     accept_host_key: Annotated[
         bool, typer.Option("--accept-host-key", help="Trust the scanned host key without verification; prefer --host-key-fingerprint.")
     ] = False,
-    ssh_key: Annotated[Path | None, typer.Option("--ssh-key", help="Private SSH key for the server. Default: ~/.ssh/id_ed25519.")] = None,
+    ssh_key: Annotated[
+        Path | None,
+        typer.Option("--ssh-key", help="Private SSH key for the server. Default: ~/.ssh/id_ed25519, else ~/.ssh/offbox_ed25519."),
+    ] = None,
 ) -> None:
     """Bootstrap an existing server while preserving its owner's access."""
     from offbox.host.init import InitOptions, init_host

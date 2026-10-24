@@ -118,6 +118,16 @@ def ensure_include(paths: Paths, config: Path | None = None) -> None:
         console.info(f"Added offbox Include at the top of {target}")
 
 
+def default_ssh_key() -> Path:
+    """~/.ssh/id_ed25519 unless only the dedicated ~/.ssh/offbox_ed25519 that setup creates exists."""
+    directory = Path.home() / ".ssh"
+    default = directory / "id_ed25519"
+    dedicated = directory / "offbox_ed25519"
+    if not default.exists() and not default.with_name("id_ed25519.pub").exists() and dedicated.exists():
+        return dedicated
+    return default
+
+
 def sync_config(paths: Paths, state: State) -> None:
     control = paths.ensure_control()
     blocks: list[str] = []

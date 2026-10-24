@@ -11,7 +11,7 @@ from offbox.host.init import InitOptions, init_host
 from offbox.paths import Paths
 from offbox.providers import credentials_env, discover_provider
 from offbox.runner import Runner
-from offbox.ssh import ensure_include, sync_config
+from offbox.ssh import default_ssh_key, ensure_include, sync_config
 from offbox.state import StateStore
 from offbox.tools import ToolDiscovery, download_prompt, install_mutagen
 
@@ -47,14 +47,14 @@ def select_key(runner: Runner, requested: Path | None, offer: Callable[[str], bo
     """Return the SSH key setup should use, or None to keep the ~/.ssh/id_ed25519 default."""
     if requested is not None:
         return requested
-    directory = Path.home() / ".ssh"
-    default = directory / "id_ed25519"
-    if default.exists() or default.with_name("id_ed25519.pub").exists():
+    key = default_ssh_key()
+    if key.name == "offbox_ed25519":
+        console.info(f"Using SSH key {key}")
+        return key
+    if key.exists() or key.with_name(key.name + ".pub").exists():
         return None
+    directory = key.parent
     dedicated = directory / "offbox_ed25519"
-    if dedicated.exists():
-        console.info(f"Using SSH key {dedicated}")
-        return dedicated
     if not create:
         return None
     if offer is None:

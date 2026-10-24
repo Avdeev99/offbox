@@ -17,7 +17,7 @@ from offbox.host.ready import Clock, SystemClock, tcp_probe, wait_ready
 from offbox.paths import Paths
 from offbox.providers import copy_provider, credentials_env, discover_provider, validate_name
 from offbox.runner import Runner
-from offbox.ssh import close_master, ensure_include, host_key_path, known_host, ssh_argv, sync_config, write_private
+from offbox.ssh import close_master, default_ssh_key, ensure_include, host_key_path, known_host, ssh_argv, sync_config, write_private
 from offbox.state import HostState, StateStore
 from offbox.timings import stage
 from offbox.tools import ToolDiscovery
@@ -67,7 +67,7 @@ def _create_host(
     if provider.manifest.driver != "tofu":
         raise PreconditionError("This provider registers existing hosts", "Run offbox host init USER@ADDRESS.")
     credentials = credentials_env(provider.manifest, paths)
-    key = (options.ssh_key or preset.ssh_key or Path.home() / ".ssh/id_ed25519").expanduser().resolve()
+    key = (options.ssh_key or preset.ssh_key or default_ssh_key()).expanduser().resolve()
     authorized_key = public_key(runner, key)
     binary = executable or ToolDiscovery(runner, paths.cache).check("tofu").path
     defaults = provider.manifest.defaults

@@ -309,3 +309,35 @@ def test_missing_credentials_name_the_variable_and_docs(
     assert caught.value.fix is not None
     assert caught.value.fix.startswith(variable)
     assert caught.value.fix.endswith(f"https://github.com/Avdeev99/offbox/blob/master/docs/installation.md{anchor}")
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [((), "id_ed25519"), (("offbox_ed25519",), "offbox_ed25519"), (("id_ed25519.pub", "offbox_ed25519"), "id_ed25519")],
+)
+def test_default_ssh_key_prefers_the_dedicated_key_only_without_id_ed25519(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, files: tuple[str, ...], expected: str
+) -> None:
+    from offbox.ssh import default_ssh_key
+
+    (tmp_path / ".ssh").mkdir()
+    for name in files:
+        (tmp_path / ".ssh" / name).write_text("synthetic key")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert default_ssh_key() == tmp_path / ".ssh" / expected
+
+
+def test_host_init_defaults_to_the_dedicated_key_setup_created(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.host.init import init_host
+
+    (tmp_path / "home/.ssh").mkdir(parents=True)
+    dedicated = tmp_path / "home/.ssh/offbox_ed25519"
+    dedicated.write_text("synthetic private key")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    runner = FakeRunner(
+        [Script(prefix=["ssh-keyscan"], stdout="192.0.2.1 ssh-ed25519 AAAA\n"), Script(prefix=["ssh-keygen", "-y"], returncode=1)]
+    )
+    paths = Paths(tmp_path / "config", tmp_path / "state", tmp_path / "cache", tmp_path / "control")
+    with pytest.raises(PreconditionError, match="SSH key is unavailable"):
+        init_host(paths, runner, InitOptions(target="dev@192.0.2.1", accept_host_key=True))
+    assert runner.calls[1].argv == ["ssh-keygen", "-y", "-P", "", "-f", str(dedicated.resolve())]
