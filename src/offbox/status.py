@@ -61,6 +61,7 @@ class Platform(DockerModel):
 
 
 class Descriptor(DockerModel):
+    digest: str | None = Field(default=None, pattern=r"^sha256:[a-f0-9]{64}$")
     platform: Platform | None = None
 
 
@@ -78,7 +79,16 @@ class ManifestEntry(DockerModel):
     docker: ImageManifest | None = Field(default=None, alias="SchemaV2Manifest")
 
 
-def registry_config_digest(text: str) -> str:
+class RegistryImage(Model):
+    config: str
+    manifests: set[str]
+
+    @property
+    def identities(self) -> set[str]:
+        return {self.config, *self.manifests}
+
+
+def registry_image(text: str) -> RegistryImage:
     try:
         entries = (
             TypeAdapter(list[ManifestEntry]).validate_json(text)
@@ -86,6 +96,7 @@ def registry_config_digest(text: str) -> str:
             else [ManifestEntry.model_validate_json(text)]
         )
         digests: set[str] = set()
+        manifests: set[str] = set()
         for entry in entries:
             platform = entry.descriptor.platform
             if platform is not None and (platform.os, platform.architecture) != ("linux", "amd64"):
@@ -93,13 +104,25 @@ def registry_config_digest(text: str) -> str:
             manifest = entry.oci or entry.docker
             if manifest is not None:
                 digests.add(manifest.config.digest)
+                if entry.descriptor.digest is not None:
+                    manifests.add(entry.descriptor.digest)
         if len(digests) != 1:
             raise ValueError("Expected one Linux amd64 image config digest")
-        return digests.pop()
+        return RegistryImage(config=digests.pop(), manifests=manifests)
     except (ValidationError, ValueError) as exc:
         raise PreconditionError(
             "Cannot determine the registry image version", "Check docker manifest inspect --verbose for the configured image."
         ) from exc
+
+
+def registry_config_digest(text: str) -> str:
+    return registry_image(text).config
+
+
+def image_repository(reference: str) -> str:
+    name = reference.split("@", 1)[0]
+    tag = name.rfind(":")
+    return name[:tag] if tag > name.rfind("/") else name
 
 
 def compose_status(text: str) -> list[StackService]:
@@ -196,9 +219,9 @@ class Status:
                 digest = result.stdout.strip()
                 if re.fullmatch(r"sha256:[a-f0-9]{64}", digest) is None:
                     raise PreconditionError("Cannot identify the cached custom image", "Run offbox up to build the configured Dockerfile.")
+                different = digest != container.image
             else:
-                result = self.runtime.remote(host, ["docker", "manifest", "inspect", "--verbose", project.env.image or ""], timeout=15)
-                digest = registry_config_digest(result.stdout)
+                different = not self.registry_current(host, project.env.image or "", container.image)
         except OffboxError as exc:
             return StatusCheck(
                 name="image",
@@ -206,13 +229,25 @@ class Status:
                 message=f"Image update check unavailable: {exc.message}",
                 fix=exc.fix or "Check the image registry and retry.",
             )
-        different = digest != container.image
         return StatusCheck(
             name="image",
             level="warning" if different else "ok",
             message="Newer image available" if different else "Image matches the configured image version",
             fix="Run offbox up --fresh." if different else None,
         )
+
+    def registry_current(self, host: HostState, image: str, running: str) -> bool:
+        """Compare by config or manifest digest; the containerd image store reports the pulled index or manifest digest instead."""
+        result = self.runtime.remote(host, ["docker", "manifest", "inspect", "--verbose", image], timeout=15)
+        latest = registry_image(result.stdout)
+        if running in latest.identities:
+            return True
+        if re.fullmatch(r"sha256:[a-f0-9]{64}", running) is None:
+            return False
+        pulled = self.runtime.remote(
+            host, ["docker", "manifest", "inspect", "--verbose", f"{image_repository(image)}@{running}"], check=False, timeout=15
+        )
+        return pulled.returncode == 0 and registry_config_digest(pulled.stdout) == latest.config
 
     def diagnose(self, *, cwd: Path | None = None) -> StatusReport:
         try:
