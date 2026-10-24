@@ -12,9 +12,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A Google Cloud benchmark of both sample apps and a same-VM comparison measuring a 12.2% median command latency reduction from batching checks, with verified cloud cleanup.
 - Opt-in `--timings` summaries for provisioning, synchronization, setup, forwarding and command execution, without changing stdout or exit codes.
 - A real Hetzner benchmark of both sample applications, including timings, resource observations, billing estimates and verified cleanup.
+- Committed provider lock files for Hetzner and Google Cloud with Terraform and OpenTofu checksums for Linux and macOS on amd64/arm64.
+- A mocked Hetzner provider contract test, plus OpenTofu validation and contract tests in CI.
+- Package metadata (authors, classifiers, keywords, documentation and changelog links) and upper bounds for runtime dependencies.
+- Issue and pull request templates and a code of conduct.
+
+### Changed
+
+- Host bootstrap waits up to 10 minutes for apt/dpkg locks, enables unattended upgrades last, and keeps installed containerd and Docker plugin versions when rerun so `host init` does not restart Docker.
+- The universal image base is pinned by digest, upgrades Ubuntu packages during the build and is rebuilt weekly without layer cache.
+- The README describes the problem offbox solves, measured results, comparisons and common questions; development details moved to CONTRIBUTING.md.
 
 ### Fixed
 
+- A failed host bootstrap writes `/var/lib/offbox/failed`, and `host create` reports it immediately with the end of the cloud-init log instead of waiting for the 15-minute readiness timeout.
+- Host bootstrap and the image verify the Docker apt signing key fingerprint before trusting it.
+- Host bootstrap reloads SSH with `try-reload-or-restart`, which works with Ubuntu 24.04 socket activation, and no longer locks the `offbox` account, which sshd rejects when `UsePAM` is off.
+- Commands run through `offbox exec` use umask 022 instead of inheriting 077, so build outputs are no longer owner-only.
+- The inner Docker daemon log is capped at 10 MiB with one rotated file.
+- Wheels and host provider workspaces no longer include local `.terraform/` directories, Terraform state, editor swap files or provider tests.
 - Existing-host teardown validates resource ownership, preserves adopted networks and refuses foreign network members before deletion; environment cleanup handles root-owned source directories.
 - Environment shutdown forwards signals to dockerd and waits within the outer stop deadline.
 - Routine command and forwarding lock contention uses bounded waits; unconfirmed SSH completion includes per-run recovery guidance.

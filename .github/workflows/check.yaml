@@ -46,11 +46,29 @@ jobs:
         with:
           terraform_version: "1.12.1"
           terraform_wrapper: false
-      - name: Provider schemas and mocked GCP contracts (no cloud credentials)
+      - name: Provider schemas and mocked contracts with Terraform (no cloud credentials)
         run: |
           terraform fmt -check -recursive providers
           terraform -chdir=providers/hetzner init -backend=false -input=false
           terraform -chdir=providers/hetzner validate
+          terraform -chdir=providers/hetzner test -no-color
           terraform -chdir=providers/gcp init -backend=false -input=false
           terraform -chdir=providers/gcp validate
           terraform -chdir=providers/gcp test -no-color
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.10.6"
+          tofu_wrapper: false
+      - name: Provider schemas and mocked contracts with OpenTofu (no cloud credentials)
+        shell: bash
+        run: |
+          git checkout -- providers/hetzner/.terraform.lock.hcl providers/gcp/.terraform.lock.hcl
+          for provider in hetzner gcp; do
+            workspace="$RUNNER_TEMP/tofu-$provider"
+            mkdir "$workspace"
+            cp -R "providers/$provider/." "$workspace/"
+            rm -rf "$workspace/.terraform"
+            tofu -chdir="$workspace" init -backend=false -input=false
+            tofu -chdir="$workspace" validate
+            tofu -chdir="$workspace" test -no-color
+          done

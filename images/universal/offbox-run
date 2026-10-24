@@ -101,11 +101,15 @@ trap 'forward_signal HUP' HUP
 exec 3<&0
 if [ "$tty" = 1 ]; then
     touch "$state_dir/$run_id.tty"
+fi
+umask 022
+if [ "$tty" = 1 ]; then
     env --default-signal=INT,TERM,HUP -- "$@" <&3 3<&- &
 else
     setsid env --default-signal=INT,TERM,HUP -- "$@" <&3 3<&- &
 fi
 child_pid=$!
+umask 077
 exec 3<&-
 identity=$(process_info "$child_pid")
 printf '%s\n' "${identity##* }" > "$state_dir/$run_id.start"

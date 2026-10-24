@@ -10,15 +10,32 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "Oleksii Avdieiev", email = "50865612+Avdeev99@users.noreply.github.com" }]
+keywords = ["docker", "docker-compose", "git-worktree", "remote-development", "coding-agents", "mutagen", "ssh", "hetzner", "gcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
 dependencies = [
     "typer>=0.27,<0.28",
-    "pydantic>=2",
-    "rich",
-    "jinja2",
+    "pydantic>=2,<3",
+    "rich>=13,<16",
+    "jinja2>=3.1,<4",
 ]
 
 [project.urls]
+Homepage = "https://github.com/Avdeev99/offbox"
 Repository = "https://github.com/Avdeev99/offbox"
+Documentation = "https://github.com/Avdeev99/offbox/tree/master/docs"
+Changelog = "https://github.com/Avdeev99/offbox/blob/master/CHANGELOG.md"
 Issues = "https://github.com/Avdeev99/offbox/issues"
 
 [project.scripts]
@@ -31,10 +48,15 @@ dev = ["pytest", "pytest-xdist", "ruff", "mypy", "pyright"]
 path = "src/offbox/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/offbox"]
-exclude = ["/src/offbox/_data/**"]
+only-include = ["src/offbox", "host", "images", "providers"]
+exclude = [
+    "/src/offbox/_data/**",
+    ".terraform/", "*.tfstate", "*.tfstate.*", "*.tfplan", "*.tfvars.json", "*.swp", "*~", ".DS_Store", ".gitkeep",
+    "/providers/*/tests/",
+]
 
-[tool.hatch.build.targets.wheel.force-include]
+[tool.hatch.build.targets.wheel.sources]
+"src/offbox" = "offbox"
 "host" = "offbox/_data/host"
 "images" = "offbox/_data/images"
 "providers" = "offbox/_data/providers"
@@ -43,12 +65,13 @@ exclude = ["/src/offbox/_data/**"]
 exclude = [
     "**/node_modules/**", "**/.venv/**", "**/dist/**",
     "**/playwright-report/**", "**/test-results/**",
+    ".terraform/", "*.tfstate", "*.tfstate.*", "*.tfplan", "*.tfvars.json", "*.swp", "*~", ".DS_Store",
 ]
 include = [
     "/src", "/tests", "/host", "/images", "/providers", "/docs", "/examples",
     "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE",
-    "/CONTRIBUTING.md", "/SECURITY.md", "/.dockerignore", "/CHANGELOG.md", "/AGENTS.md", "/Makefile",
-    "/.pre-commit-config.yaml", "/RTK.md",
+    "/CONTRIBUTING.md", "/SECURITY.md", "/CODE_OF_CONDUCT.md", "/.dockerignore", "/CHANGELOG.md", "/AGENTS.md", "/Makefile",
+    "/.pre-commit-config.yaml",
 ]
 
 [tool.ruff]

@@ -1,7 +1,5 @@
 # Repository instructions
 
-@RTK.md
-
 ## Commands
 
 Use uv for Python tooling. Run `uv sync --frozen` to install locked dependencies. Before pushing, run `make check` and `make test`. Use `make fmt` for formatting and lint fixes and `uv build` for distributions. Validation uses deterministic unit tests, static checks, builds and one focused Linux Docker/SSH smoke job. Do not create billable resources or add real-cloud tests.
@@ -22,7 +20,7 @@ Use uv for Python tooling. Run `uv sync --frozen` to install locked dependencies
 ## Git and PRs
 
 - Use conventional commit messages: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
-- One PR per milestone, targeting the existing default branch `master`. The PR description lists its milestone's acceptance criteria as a checked list, with command-output evidence for each.
+- Keep each PR focused on one change, targeting `master`. The PR description says what changed and how it was verified, including the commands run.
 - `make check` and `make test` must pass locally before pushing.
 - Never commit secrets; tests never need real credentials. Do not create billable resources for tests.
 - Keep local agent task scratch under the ignored `.agent/` directory.

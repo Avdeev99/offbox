@@ -26,13 +26,15 @@ The provider must declare these Terraform variables in `variables.tf`:
 | `size` | `string` | Provider-specific machine size |
 | `region` | `string` | Provider-specific location |
 | `image` | `string` | Ubuntu 24.04 image identifier |
-| `ssh_public_key` | `string` | User's OpenSSH public key |
+| `ssh_public_key` | `string` | User's OpenSSH public key; also installed by cloud-init, so providers may leave it unused |
 | `user_data` | `string`, sensitive | Complete rendered cloud-init configuration |
 | `labels` | `map(string)` | Includes `offbox = "1"` and `offbox-host = <name>` |
 
 Declare outputs `ip` (public IPv4 string) and `ssh_user` (`"offbox"`). Offbox parses the standard `tofu output -json` objects containing `value` fields. Use `user_data` directly on the server resource, apply labels to every owned billable resource, and let cloud-init install the supplied public key. Do not create a globally unique cloud SSH-key resource.
 
-Pin the cloud provider to a supported minor release in `versions.tf`. Credentials must be read from the provider's environment. Mark `user_data` sensitive to reduce terminal exposure; this does not encrypt Terraform state.
+Offbox always writes every variable above to `offbox.auto.tfvars.json`, so declare all of them even when the provider does not reference one. The built-in providers leave `ssh_public_key` unused because the rendered `user_data` already installs that key.
+
+Pin the cloud provider to a supported minor release in `versions.tf`. Commit a `.terraform.lock.hcl` with entries for both `registry.terraform.io` and `registry.opentofu.org` so either tool verifies provider checksums. Offbox copies the provider folder without local `.terraform/` directories, state files, editor swap files or a `tests/` folder. Credentials must be read from the provider's environment. Mark `user_data` sensitive to reduce terminal exposure; this does not encrypt Terraform state.
 
 The `tofu` driver uses OpenTofu first, Terraform second, and verified cached OpenTofu when neither is installed. It copies the provider folder into the host's state directory and writes `offbox.auto.tfvars.json` there. Every command runs in that workspace with:
 
@@ -45,4 +47,4 @@ TF_PLUGIN_CACHE_DIR=<offbox cache>/tofu-plugins
 
 Creation runs `init -input=false`, `apply -auto-approve -input=false` and `output -json` in that order. Destroy runs `destroy -auto-approve -input=false` against the saved copy. The copied workspace is retained after failure and removed only after successful teardown.
 
-Run `terraform fmt -check` and `terraform init -backend=false` followed by `terraform validate` in a disposable copy to check provider syntax and schemas. These commands do not create cloud resources. Keep actual provisioning out of the unit test suite.
+Run `terraform fmt -check` and `terraform init -backend=false` followed by `terraform validate` in a disposable copy to check provider syntax and schemas. A `tests/*.tftest.hcl` file with `mock_provider` runs `terraform test` or `tofu test` without credentials; see the built-in providers. These commands do not create cloud resources. Keep actual provisioning out of the unit test suite.

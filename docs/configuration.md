@@ -68,6 +68,15 @@ A custom Dockerfile image is cached by project-path and Dockerfile-content hashe
 
 Default ignores cover dependency/cache/build directories: `node_modules`, `.venv`, `venv`, `__pycache__`, `*.pyc`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `dist`, `build`, `.next`, `.nuxt`, `target`, `.terraform`, `.DS_Store`, and mandatory `.git`. Project patterns retain their order and repetitions so later patterns can override earlier ones. Mandatory `.git` is moved to the end once. Offbox also enables VCS-directory ignoring. Linked worktrees' regular `.git` files are excluded too, including when project patterns use negation. Offbox sessions ignore unrelated global Mutagen defaults.
 
+Patterns use Mutagen's default ignore syntax. A pattern without a `/`, such as `build` or `target`, matches that name at any depth, so the defaults also exclude source directories like `src/build/` or `packages/api/dist/`. A pattern with a `/` is relative to the worktree root, and a leading `!` re-includes a path matched by an earlier pattern. Project patterns are applied after the defaults, so a nested source directory can be re-included:
+
+```toml
+[sync]
+ignore = ["!src/build", "!tools/target"]
+```
+
+A negated pattern re-includes only the named path; files inside a directory that is still ignored stay ignored. Use `/build` to ignore a root-level directory only.
+
 `.gitignore` is not a secret filter. Add `.env` or other sensitive paths explicitly to `sync.ignore` when they must stay local. Files created remotely, such as lockfiles and formatter output, sync back under two-way-safe conflict handling.
 
 `exec --env NAME=value` overrides configured names. Automatic install receives these scoped values too; `up` stages receive configured `exec.env` values. TTY execution additionally forwards `TERM`, `COLORTERM` and `LANG` when set. Offbox does not forward the whole local environment. Known secret-named values are redacted from diagnostics; command stdout/stderr remain the command's own streams.

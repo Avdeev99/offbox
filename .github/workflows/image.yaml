@@ -8,6 +8,8 @@ on:
       - .github/workflows/image-build.yaml
       - .dockerignore
       - src/offbox/__init__.py
+  schedule:
+    - cron: "23 4 * * 1"
   push:
     branches: [master]
     tags: ["v*"]
@@ -35,10 +37,11 @@ jobs:
       publish: false
 
   publish:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')
     permissions:
       contents: read
       packages: write
     uses: ./.github/workflows/image-build.yaml
     with:
       publish: true
+      refresh: ${{ github.event_name == 'schedule' }}

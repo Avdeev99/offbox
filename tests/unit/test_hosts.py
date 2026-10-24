@@ -1,9 +1,11 @@
+import shlex
 from pathlib import Path
 
 import pytest
 from fakes import FakeRunner, Script
 
 from offbox.errors import ConnectionError_, OffboxError, PreconditionError
+from offbox.host.ready import READY_PROBE
 from offbox.paths import Paths
 from offbox.runner import Runner
 from offbox.state import HostState
@@ -407,7 +409,7 @@ def test_create_refreshes_bootstrap_login_and_checks_docker_before_ready(
     # Bootstrap grants Docker group membership after the readiness connection has opened.
     # Retire that connection and verify Docker through a fresh login before declaring ready.
     assert [call.argv for call in runner.calls][-4:] == [
-        ["ssh", "-o", "ConnectTimeout=3", "offbox-main", "--", "test -f /var/lib/offbox/ready"],
+        ["ssh", "-o", "ConnectTimeout=3", "offbox-main", "--", shlex.join(["sh", "-c", READY_PROBE])],
         ["ssh", "-O", "check", "offbox-main"],
         ["ssh", "-O", "exit", "offbox-main"],
         ["ssh", "offbox-main", "--", "docker info --format '{{.ServerVersion}}'"],

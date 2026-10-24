@@ -50,7 +50,14 @@ if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
     done
 fi
 
-dockerd --host=unix:///var/run/docker.sock > /var/log/dockerd.log 2>&1 &
+log_fifo=/run/offbox/dockerd.log.fifo
+rm -f "$log_fifo"
+mkfifo -m 0600 "$log_fifo"
+awk -v log_file=/var/log/dockerd.log -v limit=10485760 '
+    { print > log_file; fflush(log_file); size += length($0) + 1 }
+    size >= limit { close(log_file); system("mv -f " log_file " " log_file ".1"); size = 0 }
+' < "$log_fifo" &
+dockerd --host=unix:///var/run/docker.sock > "$log_fifo" 2>&1 &
 daemon_pid=$!
 deadline=$(($(date +%s) + 60))
 while [ "$(date +%s)" -lt "$deadline" ]; do

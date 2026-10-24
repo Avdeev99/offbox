@@ -1,0 +1,63 @@
+name: Bug report
+description: Report something in offbox that does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report security vulnerabilities privately instead; see SECURITY.md. Remove tokens, IP addresses, host names and private paths from everything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: The command you ran, what you expected and what happened instead, including the `Fix:` line if one was printed.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. offbox up
+        2. offbox exec -- ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: offbox --version
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: offbox doctor --json
+      description: Output of `offbox doctor --json`, with secrets, addresses and private paths removed.
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: client-os
+    attributes:
+      label: Client OS
+      placeholder: macOS 15.7 arm64, Ubuntu 24.04 amd64, WSL2 ...
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Host provider
+      options:
+        - Hetzner
+        - Google Cloud
+        - Existing SSH host
+        - Custom provider
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: Optional lines from the offbox log, with secrets removed.
+      render: text

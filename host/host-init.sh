@@ -1,12 +1,43 @@
 #!/bin/sh
 set -eu
 
+docker_key_fingerprint=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+stage=preflight
+failure=
+work_dir=
+
 fail() {
+    failure=$1
     printf 'offbox: %s\n  Fix: %s\n' "$1" "$2" >&2
     exit 3
 }
 
+cleanup() {
+    result=$?
+    if [ -n "$work_dir" ]; then
+        rm -rf "$work_dir"
+    fi
+    if [ "$result" -ne 0 ]; then
+        if [ -d /var/lib/offbox ] && [ -w /var/lib/offbox ]; then
+            printf 'exit=%s stage=%s %s\n' "$result" "$stage" "$failure" > /var/lib/offbox/failed || :
+        fi
+        if [ "$result" -ne 3 ]; then
+            printf 'offbox: bootstrap failed during %s.\n  Fix: Review the bootstrap log and retry after resolving the failure.\n' "$stage" >&2
+        fi
+    fi
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+apt_get() {
+    apt-get -o DPkg::Lock::Timeout=600 "$@"
+}
+
 [ "$(id -u)" -eq 0 ] || fail 'Bootstrap requires root.' 'Run offbox host init with passwordless sudo access.'
+install -d -m 0755 /var/lib/offbox
+rm -f /var/lib/offbox/ready /var/lib/offbox/failed
 [ "$#" -eq 2 ] || fail 'Expected image and SSH public key arguments.' 'Invoke bootstrap through offbox host create or host init.'
 image=$1
 public_key=$2
@@ -50,17 +81,6 @@ installed_docker=$(dpkg-query -W -f='${Version}' docker-ce 2>/dev/null || true)
 case "$installed_docker" in ''|5:29.*) ;; *) fail "Existing Docker version $installed_docker differs from required major 29." 'Review and migrate Docker to major 29 before retrying.' ;; esac
 
 work_dir=$(mktemp -d)
-cleanup() {
-    result=$?
-    rm -rf "$work_dir"
-    if [ "$result" -ne 0 ] && [ "$result" -ne 3 ]; then
-        printf 'offbox: bootstrap failed.\n  Fix: Review the bootstrap log and retry after resolving the failure.\n' >&2
-    fi
-}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 install_config() {
     source_file=$1
@@ -76,8 +96,7 @@ install_config() {
 printf '%s\n' "$public_key" > "$work_dir/public_key"
 ssh-keygen -lf "$work_dir/public_key" >/dev/null 2>&1 || fail 'SSH public key cannot be parsed.' 'Select a valid OpenSSH public key.'
 
-install -d -m 0755 /var/lib/offbox
-rm -f /var/lib/offbox/ready
+stage=account
 if [ "$uid_owner" = ubuntu ]; then
     userdel -r ubuntu
 fi
@@ -87,23 +106,25 @@ fi
 if ! id offbox >/dev/null 2>&1; then
     useradd --uid 1000 --gid offbox --create-home --shell /bin/bash --password '*' offbox
 fi
-usermod --lock offbox
+usermod --password '*' offbox
 install -d -m 0700 -o offbox -g offbox /home/offbox/.ssh
 printf '%s\n' "$public_key" > "$work_dir/authorized_keys"
 install_config "$work_dir/authorized_keys" /home/offbox/.ssh/authorized_keys 0600
 chown offbox:offbox /home/offbox/.ssh/authorized_keys
 
+stage=packages
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y ca-certificates curl sudo jq
+apt_get update
+apt_get install -y ca-certificates curl sudo jq gpg
 if [ "$harden" = 1 ]; then
-    apt-get install -y ufw fail2ban unattended-upgrades
+    apt_get install -y ufw fail2ban unattended-upgrades
 fi
 printf 'offbox ALL=(ALL) NOPASSWD:ALL\n' > "$work_dir/sudoers"
 visudo -cf "$work_dir/sudoers"
 install_config "$work_dir/sudoers" /etc/sudoers.d/offbox 0440
 
 if [ "$harden" = 1 ]; then
+    stage=hardening
     install -d -m 0755 /etc/ssh/sshd_config.d
     cat > "$work_dir/sshd" <<'SSH'
 PasswordAuthentication no
@@ -119,7 +140,7 @@ SSH
         grep -qx "$setting" "$work_dir/sshd-effective" || fail 'SSH hardening was overridden by host configuration.' 'Review sshd_config before retrying bootstrap.'
     done
     if [ "$config_changed" = 1 ]; then
-        systemctl reload ssh
+        systemctl try-reload-or-restart ssh
     fi
     ufw default deny incoming
     ufw allow 22/tcp
@@ -131,15 +152,22 @@ SSH
     if [ "$config_changed" = 1 ]; then
         systemctl restart fail2ban
     fi
-    printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > "$work_dir/auto-upgrades"
-    install_config "$work_dir/auto-upgrades" /etc/apt/apt.conf.d/20auto-upgrades 0644
-    systemctl enable --now unattended-upgrades
 fi
 
+stage=docker
+key_fingerprints() {
+    install -d -m 0700 "$work_dir/gnupg"
+    GNUPGHOME="$work_dir/gnupg" gpg --batch --show-keys --with-colons "$1" 2>/dev/null | awk -F: '$1 == "pub" {primary = 1; next} primary && $1 == "fpr" {print $10; primary = 0}'
+}
 install -d -m 0755 /etc/apt/keyrings
-if [ ! -f /etc/apt/keyrings/docker.asc ]; then
+docker_key=/etc/apt/keyrings/docker.asc
+if [ ! -f "$docker_key" ]; then
     curl -fsSL --max-time 60 https://download.docker.com/linux/ubuntu/gpg -o "$work_dir/docker.asc"
-    install_config "$work_dir/docker.asc" /etc/apt/keyrings/docker.asc 0644
+    docker_key=$work_dir/docker.asc
+fi
+[ "$(key_fingerprints "$docker_key")" = "$docker_key_fingerprint" ] || fail 'The Docker repository signing key has an unexpected fingerprint.' "Verify $docker_key against Docker's published key $docker_key_fingerprint before retrying."
+if [ "$docker_key" != /etc/apt/keyrings/docker.asc ]; then
+    install_config "$docker_key" /etc/apt/keyrings/docker.asc 0644
 fi
 architecture=$(dpkg --print-architecture)
 cat > "$work_dir/docker.sources" <<APT
@@ -157,16 +185,25 @@ Pin: version 5:29.*
 Pin-Priority: 1001
 APT
 install_config "$work_dir/docker.preferences" /etc/apt/preferences.d/offbox-docker 0644
-apt-get update
+apt_get update
 if [ -n "$installed_docker" ]; then
     docker_version=$installed_docker
 else
     docker_version=$(apt-cache madison docker-ce | awk '$3 ~ /^5:29[.]/ {print $3; exit}')
 fi
 [ -n "$docker_version" ] || fail 'Docker major 29 is unavailable in the official repository.' 'Check Docker repository access and package availability.'
-apt-get install -y "docker-ce=$docker_version" "docker-ce-cli=$docker_version" containerd.io docker-buildx-plugin docker-compose-plugin
+set -- "docker-ce=$docker_version" "docker-ce-cli=$docker_version"
+for package in containerd.io docker-buildx-plugin docker-compose-plugin; do
+    if dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q '^install ok installed$'; then
+        set -- "$@" "$package=$(dpkg-query -W -f='${Version}' "$package")"
+    else
+        set -- "$@" "$package"
+    fi
+done
+apt_get install -y "$@"
 usermod -aG docker offbox
 systemctl enable --now docker
+stage=network
 if docker network inspect offbox >/dev/null 2>&1; then
     subnet=$(docker network inspect --format '{{(index .IPAM.Config 0).Subnet}}' offbox)
     [ "$subnet" = 10.89.0.0/16 ] || fail 'The existing offbox network has a different subnet.' 'Remove the conflicting offbox network after reviewing its attached containers.'
@@ -179,8 +216,15 @@ if [ ! -e /var/lib/offbox/lock ]; then
 fi
 chown offbox:offbox /var/lib/offbox/lock
 chmod 0600 /var/lib/offbox/lock
+stage=image
 if ! docker pull -- "$image"; then
     printf 'offbox: warning: image pull failed; offbox up will retry.\n' >&2
+fi
+if [ "$harden" = 1 ]; then
+    stage=updates
+    printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > "$work_dir/auto-upgrades"
+    install_config "$work_dir/auto-upgrades" /etc/apt/apt.conf.d/20auto-upgrades 0644
+    systemctl enable --now unattended-upgrades
 fi
 printf '%s\n' "$version" > /var/lib/offbox/version
 touch /var/lib/offbox/ready

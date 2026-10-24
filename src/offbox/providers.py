@@ -68,11 +68,32 @@ def discover_provider(name: str, paths: Paths) -> Provider:
     return load_provider(Path(str(resource)), name)
 
 
+TERRAFORM_LOCK_FILE = ".terraform.lock.hcl"
+
+
+def is_provider_file(relative: Path) -> bool:
+    """Whether a path inside a provider folder belongs in a host workspace; local tool state and tests do not."""
+    for part in relative.parts:
+        if part.startswith(".terraform") and part != TERRAFORM_LOCK_FILE:
+            return False
+        if ".tfstate" in part or part.endswith((".tfplan", ".swp", "~")) or part in {".gitkeep", ".DS_Store", "offbox.auto.tfvars.json"}:
+            return False
+    return relative.parts[0] != "tests"
+
+
 def copy_provider(provider: Provider, destination: Path) -> str:
-    if any(path.is_symlink() for path in provider.directory.rglob("*")):
+    sources = sorted(path for path in provider.directory.rglob("*") if is_provider_file(path.relative_to(provider.directory)))
+    if any(path.is_symlink() for path in sources):
         raise PreconditionError("Provider contains symbolic links", "Replace provider symlinks with regular files before creating a host.")
     try:
-        shutil.copytree(provider.directory, destination)
+        destination.mkdir(mode=0o700, parents=True)
+        for source in sources:
+            target = destination / source.relative_to(provider.directory)
+            if source.is_dir():
+                target.mkdir(mode=0o700, exist_ok=True)
+            elif source.is_file():
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                shutil.copy2(source, target)
         digest = hashlib.sha256()
         for path in sorted(destination.rglob("*")):
             if path.is_file():
