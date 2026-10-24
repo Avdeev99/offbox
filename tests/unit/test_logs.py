@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Generator
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def test_log_filter_uses_invocation_and_env_metadata_and_preserves_redaction(tmp
     logging.getLogger("offbox.test").info("one-abcd is only text, not ownership")
     close_logs()
     selected = environment_records(paths.log_file(day), "one-abcd")
-    entries = [LogEntry.model_validate_json(line) for _index, line in selected]
+    entries = [LogEntry.model_validate_json(line) for line in selected]
     assert len(entries) == 3
     assert entries[0].env is None
     assert entries[-1].message == "multiline\nAPI_TOKEN=[REDACTED]"
@@ -130,3 +131,75 @@ def test_compose_logs_streams_service_without_sync_install_or_ports(tmp_path: Pa
     ]
     assert not runner.calls[-1].stdin
     assert len(runner.calls) == 3
+
+
+def test_concurrent_prune_and_unremovable_logs_never_fail_startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = paths_at(tmp_path)
+    paths.logs.mkdir(parents=True)
+    stuck = paths.logs / "2000-01-02.log"
+    stuck.write_text("")
+    original_glob = Path.glob
+    original_unlink = Path.unlink
+
+    def glob(self: Path, pattern: str) -> Generator[Path]:
+        yield from original_glob(self, pattern)
+        if self == paths.logs:
+            yield paths.logs / "2000-01-01.log"
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        if self == stuck:
+            raise PermissionError("read-only log directory")
+        original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "glob", glob)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    target = configure(paths, ["offbox", "status"], date(2026, 10, 24))
+    close_logs()
+    messages = [LogEntry.model_validate_json(line).message for line in target.read_text().splitlines()]
+    assert messages[0] == f"cannot prune old log {stuck}"
+    assert messages[1].startswith("invocation argv=")
+
+
+@pytest.mark.parametrize(
+    ("argv", "logged"),
+    [
+        (["offbox", "--help"], False),
+        (["offbox", "--version"], False),
+        (["offbox", "host", "create", "--help"], False),
+        (["offbox", "exec", "--", "pytest", "--help"], True),
+        (["offbox", "status"], True),
+    ],
+)
+def test_help_and_version_do_not_record_invocations(tmp_path: Path, argv: list[str], logged: bool) -> None:
+    target = configure(paths_at(tmp_path), argv, date(2026, 10, 24))
+    close_logs()
+    assert ("invocation argv=" in target.read_text()) is logged
+
+
+def test_tail_reads_only_appended_complete_lines(tmp_path: Path) -> None:
+    from offbox.logs import LogTail
+
+    path = tmp_path / "day.log"
+    first, second = record("a", "one-abcd", "first"), record("a", "one-abcd", "second")
+    path.write_text(first + second[:10])
+    tail = LogTail("one-abcd")
+    assert tail.read(path) == [first]
+    with path.open("a") as file:
+        file.write(second[10:])
+    assert tail.read(path) == [second]
+    assert tail.offset == len(first) + len(second)
+    assert tail.read(path) == []
+
+
+def test_logs_command_never_echoes_its_own_invocation(tmp_path: Path) -> None:
+    paths = paths_at(tmp_path)
+    day = date(2026, 10, 24)
+    configure(paths, ["offbox", "up"], day)
+    bind_environment("one-abcd")
+    logging.getLogger("offbox.test").info("from up")
+    configure(paths, ["offbox", "logs", "--follow"], day)
+    bind_environment("one-abcd")
+    lines = list(follow_lines(paths, "one-abcd", today=lambda: day))
+    close_logs()
+    messages = [LogEntry.model_validate_json(line).message for line in lines]
+    assert messages == ["invocation argv=['offbox', 'up']", "worktree context established", "from up"]

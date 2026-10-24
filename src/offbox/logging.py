@@ -13,6 +13,7 @@ from offbox.paths import Paths
 
 _registered_secrets: set[str] = set()
 _SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY|CREDENTIALS|KEYFILE_JSON)$", re.IGNORECASE)
+_NO_LOG_OPTIONS = frozenset({"--help", "--version"})
 _invocation: ContextVar[str] = ContextVar("offbox_invocation", default="")
 _environment: ContextVar[str | None] = ContextVar("offbox_environment", default=None)
 
@@ -24,6 +25,10 @@ class LogEntry(Model):
     level: str
     logger: str
     message: str
+
+
+def current_invocation() -> str:
+    return _invocation.get()
 
 
 def bind_environment(name: str) -> None:
@@ -102,13 +107,17 @@ class RedactingFormatter(logging.Formatter):
 def configure(paths: Paths, argv: Sequence[str], day: date | None = None) -> Path:
     current = day or date.today()
     paths.logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+    unpruned: list[Path] = []
     for candidate in paths.logs.glob("*.log"):
         try:
             file_day = date.fromisoformat(candidate.stem)
         except ValueError:
             continue
         if file_day <= current - timedelta(days=14):
-            candidate.unlink()
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                unpruned.append(candidate)
     target = paths.log_file(current)
     handler = logging.FileHandler(target, encoding="utf-8")
     target.chmod(0o600)
@@ -120,5 +129,12 @@ def configure(paths: Paths, argv: Sequence[str], day: date | None = None) -> Pat
     root.setLevel(logging.DEBUG)
     root.addHandler(handler)
     root.propagate = False
-    root.info("invocation argv=%s", [redact(arg) for arg in argv])
+    for candidate in unpruned:
+        root.warning("cannot prune old log %s", candidate)
+    if not _NO_LOG_OPTIONS.intersection(_options(argv)):
+        root.info("invocation argv=%s", [redact(arg) for arg in argv])
     return target
+
+
+def _options(argv: Sequence[str]) -> list[str]:
+    return list(argv[: argv.index("--")] if "--" in argv else argv)
