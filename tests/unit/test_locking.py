@@ -73,3 +73,26 @@ def test_ports_cancel_waits_for_global_lock(tmp_path: Path, released: bool) -> N
             with pytest.raises(PreconditionError, match="after waiting 30s"):
                 manager.cancel(work, host)
             assert clock.current == pytest.approx(30)
+
+
+def test_swap_never_waits_for_host_lock_while_holding_ports_lock(tmp_path: Path) -> None:
+    paths = Paths(tmp_path / "config", tmp_path / "state", tmp_path / "cache", tmp_path / "control")
+    work = Worktree(root=tmp_path / "work", name="work-abcd")
+    host = HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        known_hosts_path=tmp_path / "known",
+    )
+    env = EnvState(name=work.name, host=host.name, worktree_path=work.root, created_at=datetime.now(UTC), local_ports={8000: 8001})
+    store = StateStore(paths.state)
+    store.write(State(hosts={host.name: host}, envs={work.name: env}))
+    clock = ReleaseClock(None)
+    runner = FakeRunner()
+    with host_operation(paths, host.name), pytest.raises(PreconditionError, match="already running"):
+        PortManager(paths, runner, clock=clock).swap(work, 8000)
+    assert clock.current == 0
+    assert runner.calls == []
+    assert store.read().envs[work.name] == env

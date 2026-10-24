@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: smoke-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  group: smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke:

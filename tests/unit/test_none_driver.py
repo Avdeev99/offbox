@@ -74,3 +74,43 @@ def test_missing_network_does_not_prevent_directory_cleanup() -> None:
     )
     NoneDriver(runner, host()).destroy()
     assert runner.calls[-1].argv[-1] == "sudo -n rm -rf /srv/offbox /var/lib/offbox"
+
+
+def test_foreign_network_endpoint_aborts_before_any_deletion() -> None:
+    labels = {"offbox.env": "feature", "offbox.worktree": "/work"}
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"], stdout="a" * 64),
+            Script(prefix=["ssh"], stdout=json.dumps([{"Id": "a" * 64, "Name": "/offbox-feature", "Config": {"Labels": labels}}])),
+            Script(prefix=["ssh"]),
+            Script(
+                prefix=["ssh"],
+                stdout=json.dumps([{"Name": "offbox", "Labels": {"offbox.managed": "1"}, "Containers": {"b" * 64: {"Name": "foreign"}}}]),
+            ),
+        ]
+    )
+    with pytest.raises(ProviderError, match="unrelated attached"):
+        NoneDriver(runner, host()).destroy()
+    assert len(runner.calls) == 4
+    assert all(" rm " not in call.argv[-1] for call in runner.calls)
+
+
+@pytest.mark.parametrize(
+    "identity,name,labels",
+    [
+        ("b" * 64, "/offbox-feature", {"offbox.env": "feature", "offbox.worktree": "/work"}),
+        ("a" * 64, "/foreign", {"offbox.env": "feature", "offbox.worktree": "/work"}),
+        ("a" * 64, "/offbox-feature", None),
+    ],
+)
+def test_container_inventory_mismatch_aborts_before_any_deletion(identity: str, name: str, labels: dict[str, str] | None) -> None:
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"], stdout="a" * 64),
+            Script(prefix=["ssh"], stdout=json.dumps([{"Id": identity, "Name": name, "Config": {"Labels": labels}}])),
+        ]
+    )
+    with pytest.raises(ProviderError):
+        NoneDriver(runner, host()).destroy()
+    assert len(runner.calls) == 2
+    assert all(" rm " not in call.argv[-1] for call in runner.calls)

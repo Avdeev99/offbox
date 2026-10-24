@@ -240,7 +240,7 @@ fi
             _GUARD
             + """
 if [ -n "$container_id" ] && [ "$(docker container inspect --format '{{.State.Running}}' "$container")" = true ]; then
-    docker stop --time 30 "$container" >/dev/null
+    docker stop --timeout 30 "$container" >/dev/null
 fi
 """
         )

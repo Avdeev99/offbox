@@ -16,13 +16,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from offbox import console
 from offbox.config import Model
 from offbox.drivers.none import NoneDriver
-from offbox.errors import OffboxError, PreconditionError
+from offbox.errors import OffboxError, PreconditionError, ProviderError
 from offbox.execute import INSTALL_PROBE_SCRIPT
 from offbox.host.ready import SystemClock
 from offbox.naming import Worktree, worktree_name
 from offbox.paths import Paths
 from offbox.ports import PORT_DISCOVERY_SCRIPT, PortSnapshot
-from offbox.runner import Result, SubprocessRunner
+from offbox.runner import Result, StreamProcess, SubprocessRunner
 from offbox.ssh import ensure_include, known_host, ssh_argv, sync_config, write_private
 from offbox.state import HostState, State, StateStore
 from offbox.sync import SyncManager
@@ -333,23 +333,25 @@ class Smoke:
         self.complete("Real exec preserves stdout/stderr/stdin and statuses0/42/255; reinstall stays on stderr")
 
     def parallel_commands(self) -> None:
-        with (self.paths.state / "ports.lock").open("a") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            processes = [
-                self.runner.start_stream(
-                    ["sh", "-c", f"cd {shlex.quote(str(work.root))} && exec {shlex.quote(sys.executable)} -m offbox exec -- true"]
-                )
-                for work in self.worktrees
-            ]
-            self.clock.sleep(1)
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-            try:
-                for process in processes:
-                    require(process.wait(timeout=30) == 0, "Parallel worktree command failed during lock contention")
-            finally:
-                for process in processes:
-                    if process.poll() is None:
-                        process.kill()
+        processes: list[StreamProcess] = []
+        try:
+            with (self.paths.state / "ports.lock").open("a") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                processes = [
+                    self.runner.start_stream(
+                        ["sh", "-c", f"cd {shlex.quote(str(work.root))} && exec {shlex.quote(sys.executable)} -m offbox exec -- true"]
+                    )
+                    for work in self.worktrees
+                ]
+                self.clock.sleep(10)
+                require(all(process.poll() is None for process in processes), "Parallel commands did not wait for the held forwarding lock")
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            for process in processes:
+                require(process.wait(timeout=30) == 0, "Parallel worktree command failed during lock contention")
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
         self.complete("Parallel worktree commands wait for contended forwarding locks and both succeed")
 
     def existing_host_ownership(self) -> None:
@@ -368,6 +370,16 @@ class Smoke:
         self.run_command([*prefix, "network", "inspect", "offbox"])
         self.run_command([*prefix, "network", "rm", "offbox"])
         self.run_command([*prefix, "network", "create", "--label", "offbox.managed=1", "offbox"])
+        self.run_command([*prefix, "volume", "create", *labels, "offbox-probe-abcd-docker"])
+        self.run_command([*prefix, "network", "connect", "offbox", "offbox-smoke-web"])
+        try:
+            NoneDriver(nested, self.host).destroy()
+        except ProviderError as exc:
+            require("unrelated attached" in exc.message, "Teardown failed for an unexpected reason")
+        else:
+            require(False, "Teardown did not refuse an unrelated network endpoint")
+        self.run_command([*prefix, "volume", "inspect", "offbox-probe-abcd-docker"])
+        self.run_command([*prefix, "network", "disconnect", "offbox", "offbox-smoke-web"])
         NoneDriver(nested, self.host).destroy()
         self.run_command([*prefix, "network", "inspect", "offbox"], expected=1)
         self.run_command([*prefix, "volume", "inspect", "offbox-backup"])
@@ -430,6 +442,8 @@ class Smoke:
         )
         result = self.run_command([*prefix, "docker", "inspect", "--format", "{{.State.Running}}", "shutdown-stubborn"])
         require(result.stdout.strip() == "false", "Signal-ignoring inner container survived bounded outer shutdown")
+        result = self.run_command([*prefix, "docker", "inspect", "--format", "{{.State.ExitCode}}", "shutdown-stubborn"])
+        require(result.stdout.strip() == "137", "dockerd did not enforce the stubborn service stop deadline")
         self.complete("Outer stop delivers TERM to inner services, waits for dockerd, and bounds stubborn service shutdown")
 
     def root_owned_source(self, work: Worktree) -> None:
@@ -530,7 +544,11 @@ class Smoke:
         self.complete("Identical Compose names/remote8000 stay isolated through localhost8000/8001")
         self.cli(first, "exec", "--", "docker", "volume", "create", "smoke-data-marker")
         self.shutdown_probes(first)
+        stopped = self.clock.now()
         self.cli(first, "stop")
+        require(self.clock.now() - stopped < 25, "Outer stop exceeded the bounded inner shutdown budget")
+        exit_code = self.run_command(["docker", "inspect", "--format", "{{.State.ExitCode}}", first.container])
+        require(exit_code.stdout.strip() == "0", "Outer container was force-killed rather than completing graceful shutdown")
         self.cli(first, "up", timeout=600)
         self.verify_shutdown(first)
         require(self.local_port(first) == ports[0], "stop/up changed the stable local mapping")

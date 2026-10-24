@@ -3,6 +3,7 @@ from pathlib import PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from offbox import console
 from offbox.errors import ProviderError
 from offbox.runner import Result, Runner
 from offbox.ssh import ssh_argv
@@ -13,6 +14,15 @@ class DockerResource(BaseModel):
     model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
     name: str = Field(alias="Name")
     labels: dict[str, str] | None = Field(default=None, alias="Labels")
+
+
+class NetworkEndpoint(BaseModel):
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    name: str = Field(alias="Name")
+
+
+class DockerNetwork(DockerResource):
+    containers: dict[str, NetworkEndpoint] | None = Field(default=None, alias="Containers")
 
 
 class DockerConfig(BaseModel):
@@ -73,10 +83,17 @@ class NoneDriver:
             network_result = self._run(["docker", "network", "inspect", "offbox"], check=False)
             owned_network = False
             if network_result.returncode == 0:
-                networks = TypeAdapter(list[DockerResource]).validate_json(network_result.stdout)
+                networks = TypeAdapter(list[DockerNetwork]).validate_json(network_result.stdout)
                 if len(networks) != 1 or networks[0].name != "offbox":
                     raise ProviderError("Unexpected Docker network inventory", "Inspect the offbox network before retrying destruction.")
                 owned_network = (networks[0].labels or {}).get("offbox.managed") == "1"
+                if owned_network and set(networks[0].containers or {}) - set(containers):
+                    raise ProviderError(
+                        "Managed network has unrelated attached containers",
+                        "Inspect docker network inspect offbox and disconnect unrelated services before retrying destruction.",
+                    )
+                if not owned_network:
+                    console.info("Preserving the adopted or unlabelled Docker network offbox")
             elif network_result.returncode != 1 or not any(
                 text in network_result.stderr.lower() for text in ("no such network", "not found")
             ):

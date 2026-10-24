@@ -10,14 +10,19 @@ fail() {
 }
 
 # Invoked by TERM/INT traps while waiting for dockerd.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 stop_daemon() {
     trap '' TERM INT
     rm -f /run/offbox/ready
-    kill -TERM "$daemon_pid" 2>/dev/null || :
-    wait "$daemon_pid" || :
+    if [ -n "$daemon_pid" ]; then
+        kill -TERM "$daemon_pid" 2>/dev/null || :
+        wait "$daemon_pid" || :
+    fi
     exit 0
 }
+
+daemon_pid=
+trap 'stop_daemon' TERM INT
 
 install -d -m 0755 /etc/docker /run/offbox
 install -d -m 0700 -o dev -g dev /run/offbox/exec
@@ -47,7 +52,6 @@ fi
 
 dockerd --host=unix:///var/run/docker.sock > /var/log/dockerd.log 2>&1 &
 daemon_pid=$!
-trap 'stop_daemon' TERM INT
 deadline=$(($(date +%s) + 60))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     kill -0 "$daemon_pid" 2>/dev/null || fail 'The nested Docker daemon exited during startup.'
