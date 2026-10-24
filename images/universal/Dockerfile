@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
 
 ARG TARGETARCH
 ARG NODE_VERSION=22.23.4
@@ -16,6 +16,7 @@ ARG RUSTUP_VERSION=1.29.2
 ARG RUSTUP_SHA256=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4
 ARG RUST_VERSION=1.99.1
 ARG PLAYWRIGHT_VERSION=1.64.1
+ARG DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
@@ -31,16 +32,20 @@ RUN test "$TARGETARCH" = amd64 \
     && groupadd --gid 1000 dev \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash dev \
     && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential curl wget jq unzip xz-utils make cmake pkg-config ca-certificates git openssh-client \
-        sudo tini locales pipx procps util-linux iptables iproute2 kmod \
+        sudo tini locales pipx procps util-linux iptables iproute2 kmod gpg \
         postgresql-client redis-tools sqlite3 ffmpeg libpq-dev libssl-dev \
     && locale-gen en_US.UTF-8 \
     && printf 'dev ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/dev \
     && chmod 0440 /etc/sudoers.d/dev \
     && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL --max-time 60 https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
-    && chmod 0644 /etc/apt/keyrings/docker.asc \
+    && curl -fsSL --max-time 60 https://download.docker.com/linux/ubuntu/gpg -o /tmp/docker.asc \
+    && docker_key_fingerprints=$(GNUPGHOME=$(mktemp -d) gpg --batch --show-keys --with-colons /tmp/docker.asc | awk -F: '$1 == "pub" {primary = 1; next} primary && $1 == "fpr" {print $10; primary = 0}') \
+    && test "$docker_key_fingerprints" = "$DOCKER_KEY_FINGERPRINT" \
+    && install -m 0644 /tmp/docker.asc /etc/apt/keyrings/docker.asc \
+    && rm /tmp/docker.asc \
     && printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: noble\nComponents: stable\nArchitectures: amd64\nSigned-By: /etc/apt/keyrings/docker.asc\n' > /etc/apt/sources.list.d/docker.sources \
     && printf 'Package: docker-ce docker-ce-cli\nPin: version 5:29.*\nPin-Priority: 1001\n' > /etc/apt/preferences.d/offbox-docker \
     && apt-get update \

@@ -12,3 +12,12 @@ updates:
     directory: /images/universal
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  - package-ecosystem: terraform
+    directories:
+      - /providers/hetzner
+      - /providers/gcp
+    schedule:
+      interval: weekly
