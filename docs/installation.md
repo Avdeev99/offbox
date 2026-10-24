@@ -19,30 +19,29 @@ Offbox runs on your laptop and drives one Ubuntu 24.04 amd64 host over SSH. You 
    | Debian, Ubuntu | `sudo apt install git openssh-client` |
    | Fedora | `sudo dnf install git openssh-clients` |
 
-2. **Install uv**, which installs and isolates Python tools:
-
-   ```sh
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
-
-   Open a new shell afterwards so `uv` is on your `PATH`.
-
-3. **Install offbox** from this repository (it is not on PyPI yet):
-
-   ```sh
-   uv tool install git+https://github.com/Avdeev99/offbox
-   ```
-
-   uv provides Python 3.12+ for the tool if your system lacks it.
-
-4. **Provide cloud credentials** for the host you want, or prepare an existing server:
+2. **Provide cloud credentials** for the host you want, or prepare an existing server:
    - [Hetzner](#hetzner): `export HCLOUD_TOKEN=...`
    - [Google Cloud](#google-cloud): `export GOOGLE_PROJECT=...` and `gcloud auth application-default login`
    - [Existing Ubuntu server](#existing-ubuntu-server): no cloud account needed
 
    `offbox setup` never asks for tokens; it reads them from the environment or the credentials file.
 
-5. **Run setup** in a terminal:
+3. **Install offbox** with the installer:
+
+   ```sh
+   curl -LsSf https://raw.githubusercontent.com/Avdeev99/offbox/master/install.sh | sh
+   ```
+
+   The [installer](../install.sh) checks git and ssh, installs [uv](https://docs.astral.sh/uv/) with its official installer if it is missing, installs offbox with `uv tool install`, and then starts `offbox setup` when run from a terminal. uv provides Python 3.12+ for the tool if your system lacks it.
+
+   To install manually instead:
+
+   ```sh
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   uv tool install git+https://github.com/Avdeev99/offbox
+   ```
+
+4. **Run setup** if the installer did not start it:
 
    ```sh
    offbox setup
@@ -60,7 +59,7 @@ Offbox runs on your laptop and drives one Ubuntu 24.04 amd64 host over SSH. You 
 
    Without a terminal, every answer must be a flag, for example `offbox setup --provider hetzner --action create` or `offbox setup --provider ssh --action check`. See `offbox setup --help`.
 
-6. **First run.** In any Git worktree:
+5. **First run.** In any Git worktree:
 
    ```sh
    cd your-repo
@@ -71,7 +70,7 @@ Offbox runs on your laptop and drives one Ubuntu 24.04 amd64 host over SSH. You 
 
    `up` creates the worktree's environment, starts source sync, installs dependencies and starts its Compose stack. `exec` runs a command after `--` in the environment with its real exit code. `ports` lists the `localhost` forwards. `offbox doctor` and `offbox status` explain problems.
 
-7. **Clean up.** Remove a worktree's environment, and destroy the host to stop its charges:
+6. **Clean up.** Remove a worktree's environment, and destroy the host to stop its charges:
 
    ```sh
    offbox rm --yes

@@ -15,16 +15,14 @@ On a Google Cloud `e2-standard-4` VM, a warm `offbox exec -- true` took a median
 macOS, Linux, or Windows via WSL2 · git and ssh — `offbox setup` installs the rest.
 
 ```sh
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install git+https://github.com/Avdeev99/offbox
-offbox setup
+curl -LsSf https://raw.githubusercontent.com/Avdeev99/offbox/master/install.sh | sh   # installs uv + offbox, runs offbox setup
 cd your-repo
 offbox up
 offbox exec -- pytest
 offbox ports
 ```
 
-`setup` checks your tools, downloads verified Mutagen and OpenTofu when they are missing, offers a dedicated SSH key if you have none, and then creates a Hetzner or Google Cloud host in your own account or registers an existing Ubuntu 24.04 server. Cloud credentials come from your environment, never from a prompt. Creating a cloud host is billable; review its size and current price before approving. The [installation guide](docs/installation.md) walks through each platform and provider step by step.
+`setup` checks your tools, downloads verified Mutagen and OpenTofu when they are missing, offers a dedicated SSH key if you have none, and then creates a Hetzner or Google Cloud host in your own account or registers an existing Ubuntu 24.04 server. Cloud credentials come from your environment, never from a prompt. Creating a cloud host is billable; review its size and current price before approving. The [installation guide](docs/installation.md) walks through each platform and provider step by step, including a manual install without the script.
 
 When finished with a worktree, use `offbox rm --yes`. To delete a cloud host and stop its server charges:
 
