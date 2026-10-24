@@ -193,13 +193,16 @@ def test_uninstall_keeps_resources_when_state_changes_during_network_cleanup(tmp
             env: Mapping[str, str] | None = None,
             cwd: Path | None = None,
             timeout: float | None = None,
+            interruptible: bool = False,
         ) -> Result:
             with store.lock_path.open("a") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
             with store.transaction() as state:
                 state.default_host = "concurrent-change"
-            return super().run(argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout)
+            return super().run(
+                argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+            )
 
     runner = ConcurrentRunner([Script(prefix=["mutagen", "sync", "list"], stdout="[]")])
     with pytest.raises(PreconditionError, match="Local state changed"):

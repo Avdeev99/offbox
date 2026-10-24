@@ -19,6 +19,7 @@ class Call(BaseModel):
     env: dict[str, str] | None = None
     cwd: Path | None = None
     timeout: float | None = None
+    interruptible: bool = False
     stdin: bool = False
     tty: bool = False
 
@@ -92,6 +93,7 @@ class FakeRunner:
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
         timeout: float | None = None,
+        interruptible: bool = False,
     ) -> Result:
         call = Call(
             method="run",
@@ -102,6 +104,7 @@ class FakeRunner:
             env=dict(env) if env is not None else None,
             cwd=cwd,
             timeout=timeout,
+            interruptible=interruptible,
         )
         result = self._match(call)
         if check and result.returncode:

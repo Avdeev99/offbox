@@ -134,19 +134,26 @@ def use(name: Annotated[str, typer.Argument()]) -> None:
 
 @app.command()
 def destroy(
-    ctx: typer.Context, name: Annotated[str | None, typer.Argument()] = None, yes: Annotated[bool, typer.Option("--yes")] = False
+    ctx: typer.Context,
+    name: Annotated[str | None, typer.Argument()] = None,
+    yes: Annotated[bool, typer.Option("--yes")] = False,
+    forget: Annotated[
+        bool, typer.Option("--forget", help="For an unreachable SSH host: remove only the local record and leave the server untouched.")
+    ] = False,
 ) -> None:
     """Destroy a host and its environments."""
     paths = Paths.discover()
     host = select_host(paths, name)
     envs = [env.name for env in StateStore(paths.state).read().envs.values() if env.host == host.name]
-    console.warn(f"Destroying {host.name} loses environments: {', '.join(envs) if envs else '(none)'}")
+    action = "Forgetting" if forget else "Destroying"
+    console.warn(f"{action} {host.name} loses environments: {', '.join(envs) if envs else '(none)'}")
     if not yes:
         if not sys.stdin.isatty():
-            raise PreconditionError("Destruction requires --yes without a TTY", f"Run offbox host destroy {host.name} --yes.")
-        if not typer.confirm(f"Destroy host {host.name}?"):
+            flags = " --forget" if forget else ""
+            raise PreconditionError("Destruction requires --yes without a TTY", f"Run offbox host destroy {host.name}{flags} --yes.")
+        if not typer.confirm(f"{'Forget' if forget else 'Destroy'} host {host.name}?"):
             raise PreconditionError("Destruction cancelled", "Run the command again when ready.")
-    destroy_host(paths, _runner(ctx), host.name)
+    destroy_host(paths, _runner(ctx), host.name, forget=forget)
 
 
 class HostSshCommand(TyperCommand):

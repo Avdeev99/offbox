@@ -1,3 +1,5 @@
+import logging
+import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,7 +10,7 @@ from offbox import console
 from offbox.config import HostPreset, Model, UserConfig, load_config
 from offbox.drivers.base import HostVariables
 from offbox.drivers.tofu import TofuDriver
-from offbox.errors import OffboxError, PreconditionError
+from offbox.errors import OffboxError, PreconditionError, ProviderInterrupted
 from offbox.host import host_operation, public_key
 from offbox.host.cloudinit import generate_host_key, render_cloud_init
 from offbox.host.ready import Clock, SystemClock, tcp_probe, wait_ready
@@ -19,6 +21,8 @@ from offbox.ssh import close_master, ensure_include, host_key_path, known_host, 
 from offbox.state import HostState, StateStore
 from offbox.timings import stage
 from offbox.tools import ToolDiscovery
+
+logger = logging.getLogger(__name__)
 
 
 class CreateOptions(Model):
@@ -32,6 +36,14 @@ class CreateOptions(Model):
     @classmethod
     def check_name(cls, value: str) -> str:
         return validate_name(value)
+
+
+def _remove_unrecorded(directory: Path) -> None:
+    try:
+        shutil.rmtree(directory)
+    except OSError:
+        logger.exception("Cannot remove unrecorded host directory %s", directory)
+        console.warn(f"Remove {directory} before retrying host creation.")
 
 
 def _create_host(
@@ -66,31 +78,39 @@ def _create_host(
         raise PreconditionError("Provider size, region and image are required", "Set provider defaults or a matching host preset.")
     directory = paths.state / "hosts" / options.name
     workspace = directory / "tofu"
-    with store.transaction() as state:
-        if options.name in state.hosts:
-            raise PreconditionError(
-                f"Host {options.name} already exists", f"Run offbox host destroy {options.name} or choose another name."
+    created = recorded = False
+    try:
+        with store.transaction() as state:
+            if options.name in state.hosts:
+                raise PreconditionError(
+                    f"Host {options.name} already exists", f"Run offbox host destroy {options.name} or choose another name."
+                )
+            if directory.exists():
+                raise PreconditionError(
+                    f"Host directory already exists: {directory}",
+                    "Inspect the existing directory before removing it or choose another host name.",
+                )
+            directory.mkdir(parents=True, mode=0o700)
+            created = True
+            digest = copy_provider(provider, workspace)
+            host = HostState(
+                name=options.name,
+                provider=provider.manifest.name,
+                address="",
+                ssh_user="offbox",
+                created_at=datetime.now(UTC),
+                provider_dir=workspace,
+                provider_files_hash=digest,
+                known_hosts_path=directory / "known_hosts",
+                ssh_key=key,
+                phase="creating",
             )
-        if directory.exists():
-            raise PreconditionError(
-                f"Host directory already exists: {directory}",
-                "Inspect the existing directory before removing it or choose another host name.",
-            )
-        directory.mkdir(parents=True, mode=0o700)
-        digest = copy_provider(provider, workspace)
-        host = HostState(
-            name=options.name,
-            provider=provider.manifest.name,
-            address="",
-            ssh_user="offbox",
-            created_at=datetime.now(UTC),
-            provider_dir=workspace,
-            provider_files_hash=digest,
-            known_hosts_path=directory / "known_hosts",
-            ssh_key=key,
-            phase="creating",
-        )
-        state.hosts[host.name] = host
+            state.hosts[host.name] = host
+        recorded = True
+    finally:
+        if created and not recorded:
+            _remove_unrecorded(directory)
+    cleanup = f"Run offbox host destroy {host.name} to clean up; its provider workspace was retained."
     try:
         private, public = generate_host_key(runner, host_key_path(host))
         write_private(host.known_hosts_path, known_host(host.name, public))
@@ -122,14 +142,21 @@ def _create_host(
             state.hosts[host.name] = host
             if state.default_host is None:
                 state.default_host = host.name
+    except ProviderInterrupted as exc:
+        fix = (
+            f"Run offbox host destroy {host.name}, then check the provider console for resources labelled "
+            f"offbox-host={host.name} and delete any that remain."
+            if exc.killed
+            else cleanup
+        )
+        raise OffboxError(f"Creating host {host.name} failed: {exc.message}", fix, exc.exit_code) from exc
+    except OffboxError as exc:
+        raise OffboxError(f"Creating host {host.name} failed: {exc.message}", cleanup, exc.exit_code) from exc
+    except KeyboardInterrupt as exc:
+        raise OffboxError(f"Creating host {host.name} was interrupted", cleanup, 130) from exc
+    finally:
         host_key_path(host).unlink(missing_ok=True)
         host_key_path(host).with_name(host_key_path(host).name + ".pub").unlink(missing_ok=True)
-    except OffboxError as exc:
-        raise OffboxError(
-            f"Creating host {host.name} failed: {exc.message}",
-            f"Run offbox host destroy {host.name} to clean up; its provider workspace was retained.",
-            exc.exit_code,
-        ) from exc
     console.success(f"Host {host.name}: {host.address} ({timer.now() - started:.1f}s)")
     return host
 

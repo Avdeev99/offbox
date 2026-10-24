@@ -73,10 +73,13 @@ class NestedHostRunner(SubprocessRunner):
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
         timeout: float | None = None,
+        interruptible: bool = False,
     ) -> Result:
         require(argv[0] == "ssh", "Nested-host probe received a non-SSH command")
         nested = ssh_argv(self.host.name, ["docker", "exec", "-u", "root", self.work.container, "sh", "-c", argv[-1]])
-        return super().run(nested, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout)
+        return super().run(
+            nested, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+        )
 
 
 class Smoke:

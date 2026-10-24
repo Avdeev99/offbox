@@ -111,3 +111,4 @@ class NoneDriver:
         if owned_network:
             self._run(["docker", "network", "rm", "offbox"])
         self._run(["sudo", "-n", "rm", "-rf", "/srv/offbox", "/var/lib/offbox"])
+        self._run(["sudo", "-n", "rm", "-f", "/etc/sudoers.d/offbox", "/home/offbox/.ssh/authorized_keys"])

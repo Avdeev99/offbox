@@ -13,7 +13,7 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict
 
 from offbox import console
-from offbox.errors import CommandFailed, OffboxError, PreconditionError
+from offbox.errors import CommandFailed, PreconditionError, ProviderInterrupted
 from offbox.logging import redact, register_secrets
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,7 @@ class Runner(Protocol):
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
         timeout: float | None = None,
+        interruptible: bool = False,
     ) -> Result: ...
 
     def stream(self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False) -> int: ...
@@ -143,18 +144,29 @@ class SubprocessRunner:
             outputs = {stdout: bytearray(), stderr: bytearray()}
             pending = {stdout: bytearray(), stderr: bytearray()}
             names = {stdout: "stdout", stderr: "stderr"}
-            interrupted = False
+            interrupts = 0
 
             def interrupt() -> None:
-                nonlocal deadline, interrupted
-                if interrupted:
-                    raise KeyboardInterrupt
-                interrupted = True
-                with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGINT)
-                stop_deadline = time.monotonic() + 30
-                deadline = stop_deadline if deadline is None else min(deadline, stop_deadline)
-                console.warn("Interrupt received; allowing the provider to save state.")
+                nonlocal interrupts
+                interrupts += 1
+                if interrupts == 1:
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGINT)
+                    console.warn("Interrupt received; waiting for the provider to save state. Do not close this terminal.")
+                elif interrupts == 2:
+                    console.warn(
+                        "The provider is still finishing and recording created resources. "
+                        "Press Ctrl-C again to force-stop it; untracked cloud resources may keep billing."
+                    )
+                else:
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                    raise ProviderInterrupted(
+                        "Provider operation was force-stopped before saving its state",
+                        "Check the provider console for resources labelled offbox-host and delete them, then run offbox host destroy NAME.",
+                        killed=True,
+                    )
 
             try:
                 with selectors.DefaultSelector() as selector:
@@ -183,8 +195,10 @@ class SubprocessRunner:
                         break
                     except KeyboardInterrupt:
                         interrupt()
-                if interrupted:
-                    raise OffboxError("Provider operation interrupted", "Run offbox host list and destroy the interrupted host.", 130)
+                if interrupts:
+                    raise ProviderInterrupted(
+                        "Provider operation interrupted", "Run offbox host list and destroy the interrupted host.", killed=False
+                    )
             except (OSError, subprocess.TimeoutExpired, KeyboardInterrupt):
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
@@ -204,10 +218,11 @@ class SubprocessRunner:
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
         timeout: float | None = None,
+        interruptible: bool = False,
     ) -> Result:
         start, values = self._start(argv, env)
         try:
-            if capture and input is None and env is not None and env.get("TF_IN_AUTOMATION") == "1":
+            if interruptible:
                 completed = self._run_logged(argv, values, cwd, timeout)
             else:
                 completed = subprocess.run(
