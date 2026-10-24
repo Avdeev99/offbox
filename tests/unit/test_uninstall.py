@@ -3,12 +3,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 from pydantic import TypeAdapter
 
 from offbox.errors import CommandFailed, ConnectionError_, PreconditionError
 from offbox.logging import configure
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.ssh import include_line, remove_include
 from offbox.state import HostState, State, StateStore
 from offbox.uninstall import uninstall

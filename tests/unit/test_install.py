@@ -2,13 +2,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.config import InstallConfig, ProjectConfig
 from offbox.errors import CommandFailed, OffboxError, PreconditionError
 from offbox.execute import Executor, install_paths
 from offbox.naming import Worktree
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.state import HostState
 
 

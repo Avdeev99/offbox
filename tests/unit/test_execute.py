@@ -2,11 +2,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.errors import ConnectionError_, UsageError
 from offbox.naming import Worktree
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.state import HostState
 
 

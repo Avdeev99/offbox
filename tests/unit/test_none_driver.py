@@ -3,10 +3,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.drivers.none import NoneDriver
 from offbox.errors import ProviderError
-from offbox.runner import FakeRunner, Script
 from offbox.state import HostState
 
 

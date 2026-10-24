@@ -5,13 +5,14 @@ from ipaddress import IPv4Address
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.config import PortsConfig
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
 from offbox.naming import Worktree, worktree_name
 from offbox.paths import Paths
 from offbox.ports import ForwardSpec, PortManager, PortsReport, allocate_port, forwarding_command, parse_compose
-from offbox.runner import FakeRunner, Runner, Script
+from offbox.runner import Runner
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, State, StateStore
 

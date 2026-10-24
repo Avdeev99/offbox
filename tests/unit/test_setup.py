@@ -3,12 +3,13 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.doctor import Check, DoctorReport
 from offbox.errors import PreconditionError
 from offbox.host.create import CreateOptions
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Runner, Script
+from offbox.runner import Runner
 from offbox.setup import SetupOptions, setup
 from offbox.ssh import include_line, ssh_argv
 from offbox.state import HostState, State, StateStore

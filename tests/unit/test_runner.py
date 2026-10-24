@@ -4,11 +4,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.errors import CommandFailed, PreconditionError
 from offbox.logging import configure
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script, SubprocessRunner
+from offbox.runner import SubprocessRunner
 
 
 def test_fake_records_exact_options_and_prefixes(tmp_path: Path) -> None:

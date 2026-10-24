@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.config import SyncConfig
 from offbox.errors import CommandFailed, PreconditionError
 from offbox.naming import Worktree
-from offbox.runner import FakeRunner, Script
 from offbox.state import HostState
 from offbox.sync import DEFAULT_IGNORES, Endpoint, IgnoreConfig, Permissions, SyncManager, SyncSession, create_command, health
 

@@ -4,13 +4,13 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.errors import CommandFailed, ConnectionError_
 from offbox.logging import LogEntry, bind_environment, close_logs, configure
 from offbox.logs import environment_records, follow_lines, stack_logs
 from offbox.naming import worktree_name
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.state import EnvState, HostState, State, StateStore
 
 

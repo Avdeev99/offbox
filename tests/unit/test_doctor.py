@@ -2,13 +2,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 from typer.testing import CliRunner
 
 from offbox import cli
 from offbox.doctor import Check, DoctorReport, check_key, diagnose
 from offbox.errors import PreconditionError
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script, SubprocessRunner
+from offbox.runner import SubprocessRunner
 from offbox.state import HostState, State, StateStore
 from offbox.tools import ToolDiscovery
 

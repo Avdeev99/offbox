@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.config import EnvConfig
 from offbox.errors import PreconditionError
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.state import EnvState, HostState, State, StateStore
 from offbox.sync import DEFAULT_IGNORES
 

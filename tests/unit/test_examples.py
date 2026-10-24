@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.config import ProjectConfig, load_config
 from offbox.errors import CommandFailed
 from offbox.execute import Executor
 from offbox.naming import Worktree
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.state import HostState
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"

@@ -4,9 +4,10 @@ import subprocess
 from collections.abc import Sequence
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.errors import PreconditionError
-from offbox.runner import FakeRunner, Script, SubprocessRunner
+from offbox.runner import SubprocessRunner
 
 
 class Process:

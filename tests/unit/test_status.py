@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 from pydantic import ValidationError
 
 from offbox import DEFAULT_IMAGE
 from offbox.errors import PreconditionError
 from offbox.naming import Worktree, worktree_name
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, State, StateStore
 from offbox.status import Status, StatusCheck, StatusReport, compose_status, registry_config_digest

@@ -4,10 +4,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox import tools
 from offbox.errors import PreconditionError
-from offbox.runner import FakeRunner, Script
 from offbox.tools import ToolDiscovery, install_tofu
 
 

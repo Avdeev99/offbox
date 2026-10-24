@@ -1,10 +1,11 @@
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.errors import ConnectionError_, OffboxError, PreconditionError
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Runner, Script
+from offbox.runner import Runner
 
 
 def paths_at(root: Path) -> Paths:
