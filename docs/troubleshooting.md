@@ -41,7 +41,7 @@ Correct the named file or key, then retry. Keep provider workspaces and state un
 - `Fix: Correct <path>; keep permissions at 0600.`
 - `Fix: Correct these keys in <path>.`
 - `Fix: Fix the TOML syntax and permissions in <path>.`
-- `Fix: Set HCLOUD_TOKEN or hetzner.token in credentials.toml (mode 0600).`
+- `Fix: Set HCLOUD_TOKEN or hetzner.token in credentials.toml (mode 0600); see https://github.com/Avdeev99/offbox/blob/master/docs/installation.md#hetzner.`
 - `Fix: chmod 600 <path>`
 - `Fix: Check free space and state directory permissions.`
 - `Fix: Check the state directory permissions.`

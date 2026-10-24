@@ -16,15 +16,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A mocked Hetzner provider contract test, plus OpenTofu validation and contract tests in CI.
 - Package metadata (authors, classifiers, keywords, documentation and changelog links) and upper bounds for runtime dependencies.
 - Issue and pull request templates and a code of conduct.
+- A one-line installer (`install.sh`) for macOS, Linux and WSL2 that installs uv if needed, installs offbox and starts `offbox setup`, and an installation guide with step-by-step platform and provider instructions.
+- `offbox setup` downloads pinned, SHA-256-verified Mutagen 0.18.1 when no Mutagen 0.18.x is installed, and offers to create a dedicated `~/.ssh/offbox_ed25519` key when no key exists.
+- `host init --host-key-fingerprint` (also on `setup`) verifies an existing server's key against a fingerprint obtained out of band.
+- `host destroy --forget` removes the local record of an unreachable existing-SSH host.
+- `exec.env` names are approved by `offbox up`; `exec` refuses names that changed since and refuses provider credential variables.
+- Help text for every CLI option, and `exec --help` shows the `-- COMMAND` form.
 
 ### Changed
 
 - Host bootstrap waits up to 10 minutes for apt/dpkg locks, enables unattended upgrades last, and keeps installed containerd and Docker plugin versions when rerun so `host init` does not restart Docker.
 - The universal image base is pinned by digest, upgrades Ubuntu packages during the build and is rebuilt weekly without layer cache.
 - The README describes the problem offbox solves, measured results, comparisons and common questions; development details moved to CONTRIBUTING.md.
+- `host destroy` always runs the cloud destroy, treating local Mutagen and SSH cleanup failures as warnings, and reinitializes the provider workspace first so a cleared cache cannot block it.
+- `uninstall --yes` refuses while cloud hosts remain unless `--abandon-cloud-hosts` is given; existing-SSH host teardown also removes the `offbox` sudoers entry and authorized key.
+- `up --fresh` requires confirmation or `--yes`, `doctor` fails when no host is configured, and `setup --action check` no longer edits SSH configuration.
+- Warm `exec` runs one remote preflight instead of three probes and restores port forwards alongside the command; readiness polling is faster.
+- `up` warns when CPU, memory, shared-memory or image settings differ from the running container.
+- Automatic Compose forwards are capped at 32 per environment.
+- State and cache directories are private (0700), and the previous state file is kept as `state.json.bak`.
 
 ### Fixed
 
+- Interrupting provisioning no longer kills OpenTofu mid-apply; Ctrl-C after a VM exists prints the `host destroy` command and exits 130.
+- An unreadable state file reports the backup and the manual `tofu destroy` commands for each provider workspace.
+- Generated SSH configuration disables agent and X11 forwarding and offers only the configured key, so user-wide `Host *` settings no longer apply to offbox hosts; `host init` quotes the known-hosts path.
+- Every `--env` and `exec.env` value is redacted from logs and verbose output, regardless of the variable name.
+- `exec` no longer waits for another worktree's `up`, concurrent `exec` calls in one worktree wait for a running installation instead of failing, and port-restore errors no longer prevent the command from running.
+- Closing the terminal relays termination to the remote command instead of orphaning it.
+- Concurrent invocations no longer fail while pruning old log files; `logs --follow` reads incrementally.
+- `ports --swap` works when the port's current owner is stopped.
+- The image freshness check recognises Docker's containerd image store digests.
+- Fix lines on non-terminal stderr are no longer wrapped at 80 columns.
+- `uninstall` stops a Mutagen daemon started from the downloaded copy before removing it.
 - A failed host bootstrap writes `/var/lib/offbox/failed`, and `host create` reports it immediately with the end of the cloud-init log instead of waiting for the 15-minute readiness timeout.
 - Host bootstrap and the image verify the Docker apt signing key fingerprint before trusting it.
 - Host bootstrap reloads SSH with `try-reload-or-restart`, which works with Ubuntu 24.04 socket activation, and no longer locks the `offbox` account, which sshd rejects when `UsePAM` is off.
