@@ -24,6 +24,7 @@ Use `offbox --help` or the command’s `--help` to inspect flags. Destructive op
 - `Fix: Create or initialise the host before selecting it.`
 - `Fix: Pass a command after -- for noninteractive SSH.`
 - `Fix: Run offbox host destroy <host> --yes.`
+- `Fix: Run offbox host destroy <host> --forget --yes.`
 - `Fix: Run offbox host destroy <host> to clean up the pending host.`
 - `Fix: Run offbox logs --stack SERVICE.`
 - `Fix: Run offbox --help for valid arguments.`
@@ -43,7 +44,8 @@ Correct the named file or key, then retry. Keep provider workspaces and state un
 - `Fix: chmod 600 <path>`
 - `Fix: Check free space and state directory permissions.`
 - `Fix: Check the state directory permissions.`
-- `Fix: Repair or restore the state file before continuing.`
+- `Fix: Repair the state file.`
+- `Fix: Restore the previous state with cp <state>.bak <state>, or repair it; to delete cloud hosts without offbox, run tofu -chdir=<workspace> destroy.` One command is printed for each `hosts/*/tofu` workspace.
 - `Fix: Remove the directory and retry.`
 
 ## Tools and local processes
@@ -65,6 +67,7 @@ Check `offbox doctor` first. Mutagen is a separate installation. OpenTofu downlo
 - `Fix: Inspect and stop the local SSH process manually.`
 - `Fix: Install <tool> and check its permissions.`
 - `Fix: Run offbox host list and destroy the interrupted host.`
+- `Fix: Check the provider console for resources labelled offbox-host and delete them, then run offbox host destroy NAME.`
 - `Fix: Stop the local SSH process and inspect the remote command.`
 - `Fix: Supply a command to run.`
 - `Fix: Check connectivity with offbox host ssh <selected>.`
@@ -75,7 +78,7 @@ Check `offbox doctor` first. Mutagen is a separate installation. OpenTofu downlo
 
 ## Hosts and providers
 
-Keep a failed host’s copied provider workspace so `host destroy` can clean up its billable resources. A stopped cloud server can still bill. Verify a changed host fingerprint independently before accepting it; replacing a pinned key without verifying identity defeats SSH host checking. Public-key regeneration commands write the `.pub` sidecar, not a replacement private key.
+Keep a failed host’s copied provider workspace so `host destroy` can clean up its billable resources. A stopped cloud server can still bill. Cloud destroy continues when local sync or SSH master cleanup fails and prints what to stop manually. After Ctrl-C, Offbox waits for OpenTofu to save state; only a third Ctrl-C force-stops it, after which resources labelled `offbox-host=<host>` may exist without being tracked. `host destroy --forget` is only for unreachable SSH hosts. Verify a changed host fingerprint independently before accepting it; replacing a pinned key without verifying identity defeats SSH host checking. Public-key regeneration commands write the `.pub` sidecar, not a replacement private key.
 
 - `Fix: Check state directory permissions.`
 - `Fix: Correct the SSH public key file permissions and encoding.`
@@ -90,6 +93,7 @@ Keep a failed host’s copied provider workspace so `host destroy` can clean up 
 - `Fix: Check state directory permissions and ssh-keygen.`
 - `Fix: Inspect the existing directory before removing it or choose another host name.`
 - `Fix: Run offbox host destroy <host> to clean up; its provider workspace was retained.`
+- `Fix: Run offbox host destroy <host>, then check the provider console for resources labelled offbox-host=<host> and delete any that remain.`
 - `Fix: Run offbox host destroy <host> or choose another name.`
 - `Fix: Run offbox host init USER@ADDRESS.`
 - `Fix: Set provider defaults or a matching host preset.`
@@ -103,6 +107,9 @@ Keep a failed host’s copied provider workspace so `host destroy` can clean up 
 - `Fix: Verify the server identity before changing its stored host key.`
 - `Fix: Install OpenTofu or Terraform and retry.`
 - `Fix: Remove the obsolete local host directory manually.`
+- `Fix: Run offbox host destroy <host> again.`
+- `Fix: Run offbox host destroy <host> again, then check the provider console for resources labelled offbox-host=<host> and delete any that remain.`
+- `Fix: Run offbox host destroy <host> --yes to delete it.`
 - `Fix: Repair the environment state before destroying its host.`
 - `Fix: Restore the host's saved provider workspace before destroying it.`
 - `Fix: Run host destroy again after other operations finish.`
@@ -282,7 +289,7 @@ Do not terminate an unrelated local service just because it holds a preferred po
 
 ## Logs, setup and uninstall
 
-`logs --stack [SERVICE]` reads Compose output without running setup. Noninteractive setup needs an explicit provider/action. Uninstall removes local runtime records; it does not delete remote hosts or stop their billing. Destroy hosts first when you want them gone, and preserve custom providers and credentials under the configuration directory.
+`logs --stack [SERVICE]` reads Compose output without running setup. Noninteractive setup needs an explicit provider/action. Uninstall removes local runtime records; it does not delete remote hosts or stop their billing, and with registered cloud hosts it also requires `--abandon-cloud-hosts`. Destroy hosts first when you want them gone, and preserve custom providers and credentials under the configuration directory.
 
 - `Fix: Run offbox status and check host connectivity.`
 - `Fix: Check log permissions and encoding.`
@@ -302,6 +309,8 @@ Do not terminate an unrelated local service just because it holds a preferred po
 - `Fix: Restore an owned directory without symlinks before uninstalling.`
 - `Fix: Restore the owned config directory before uninstalling.`
 - `Fix: Run offbox host destroy <host> first for each remaining host, or offbox uninstall --yes to retain the hosts.`
+- `Fix: Run offbox host destroy <host> first for each remaining host, or offbox uninstall --yes --abandon-cloud-hosts to retain the hosts.`
+- `Fix: Run offbox host destroy <host> --yes first for each cloud host, or add --abandon-cloud-hosts to keep them running without local records.`
 - `Fix: Separate offbox config, state, cache and control directories.`
 - `Fix: Wait for other offbox operations to finish and retry uninstall.`
 

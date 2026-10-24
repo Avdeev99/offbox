@@ -26,7 +26,7 @@ Every inner Docker daemon has its own image store. Downloads can count against D
 
 `stop` retains synchronized source and Docker data. `up --fresh` replaces the container and its Docker data, keeping source. `rm` removes the environment's remote source directory and Docker data. Keep valuable generated files synced back or backed up before removal. Host destruction removes all environments on that host; a cloud host can be charged until provider deletion completes.
 
-Local state, copied provider workspaces and pinned host keys are required for reliable cleanup. Preserve them until hosts are destroyed. `uninstall --yes` can remove local records while remote hosts remain; it does not stop their charges. Follow its remaining-host instructions before uninstalling when you want to delete those hosts.
+Local state, copied provider workspaces and pinned host keys are required for reliable cleanup. Preserve them until hosts are destroyed. `uninstall --yes` refuses while cloud hosts are registered unless you also pass `--abandon-cloud-hosts`; abandoned hosts keep running and billing without local records, and are identified by the label `offbox-host=NAME`. Registered SSH hosts are retained remotely. Destroy hosts with `offbox host destroy NAME --yes` before uninstalling when you want them gone. Each state write keeps the previous `state.json` as `state.json.bak` for manual recovery.
 
 Install coordination is per environment on one client. Shared remote worktrees managed from multiple laptops are outside the supported model. Port swap failures preserve ownership metadata; an incomplete rollback can require closing the affected SSH master and restoring forwards, as the printed `Fix:` explains.
 
