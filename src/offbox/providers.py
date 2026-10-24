@@ -86,7 +86,7 @@ def copy_provider(provider: Provider, destination: Path) -> str:
     if any(path.is_symlink() for path in sources):
         raise PreconditionError("Provider contains symbolic links", "Replace provider symlinks with regular files before creating a host.")
     try:
-        destination.mkdir(mode=0o700)
+        destination.mkdir(mode=0o700, parents=True)
         for source in sources:
             target = destination / source.relative_to(provider.directory)
             if source.is_dir():
