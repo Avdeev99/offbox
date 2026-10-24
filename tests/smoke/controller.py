@@ -346,16 +346,16 @@ class Smoke:
                     )
                     for work in self.worktrees
                 ]
-                self.clock.sleep(10)
-                require(all(process.poll() is None for process in processes), "Parallel commands did not wait for the held forwarding lock")
+                for process in processes:
+                    require(process.wait(timeout=60) == 0, "Parallel worktree command failed or waited on the held forwarding lock")
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-            for process in processes:
-                require(process.wait(timeout=30) == 0, "Parallel worktree command failed during lock contention")
         finally:
             for process in processes:
                 if process.poll() is None:
                     process.kill()
-        self.complete("Parallel worktree commands wait for contended forwarding locks and both succeed")
+        for work in self.worktrees:
+            self.cli(work, "ports")
+        self.complete("Parallel worktree commands run while forwarding is contended and forwards restore afterwards")
 
     def existing_host_ownership(self) -> None:
         work = self.worktrees[0]

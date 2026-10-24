@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -87,7 +88,7 @@ def test_exec_usage_shows_command_separator() -> None:
 
     result = CliRunner().invoke(app, ["exec", "--help"], prog_name="offbox", terminal_width=200)
     assert result.exit_code == 0
-    assert "Usage: offbox exec [OPTIONS] -- COMMAND [ARGS]..." in result.stdout
+    assert "Usage: offbox exec [OPTIONS] -- COMMAND [ARGS]..." in re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
 
 
 def test_every_cli_parameter_has_help() -> None:
