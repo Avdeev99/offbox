@@ -3,10 +3,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.errors import ConnectionError_, ProviderError
 from offbox.host.ready import BOOTSTRAP_FAILED, READY_PROBE, wait_ready
-from offbox.runner import FakeRunner, Script
 
 PROBE_ARGV = ["ssh", "-o", "ConnectTimeout=3", "offbox-main", "--", shlex.join(["sh", "-c", READY_PROBE])]
 TAIL_ARGV = ["ssh", "-o", "ConnectTimeout=3", "offbox-main", "--", "sudo -n tail -n 40 /var/log/cloud-init-output.log"]
