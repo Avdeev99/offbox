@@ -15,7 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Existing-host teardown validates resource ownership and preserves adopted networks; environment cleanup handles root-owned source directories.
+- Existing-host teardown validates resource ownership, preserves adopted networks and refuses foreign network members before deletion; environment cleanup handles root-owned source directories.
 - Environment shutdown forwards signals to dockerd and waits within the outer stop deadline.
 - Routine command and forwarding lock contention uses bounded waits; unconfirmed SSH completion includes per-run recovery guidance.
 - Public contribution workflows use restricted credentials and publication jobs; release tags remain blocked while publishing is deferred.

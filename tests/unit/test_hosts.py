@@ -431,6 +431,7 @@ def test_none_driver_removes_only_offbox_resources_in_order() -> None:
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
         ]
     )
     host = HostState(
@@ -448,6 +449,7 @@ def test_none_driver_removes_only_offbox_resources_in_order() -> None:
         "docker volume ls -q --filter label=offbox.env",
         "docker volume inspect offbox-feature-docker",
         "docker network inspect offbox",
+        "docker ps -aq --no-trunc --filter network=offbox",
         "docker rm -f abcdef012345",
         "docker volume rm offbox-feature-docker",
         "docker network rm offbox",

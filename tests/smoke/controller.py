@@ -371,6 +371,7 @@ class Smoke:
         self.run_command([*prefix, "network", "rm", "offbox"])
         self.run_command([*prefix, "network", "create", "--label", "offbox.managed=1", "offbox"])
         self.run_command([*prefix, "volume", "create", *labels, "offbox-probe-abcd-docker"])
+        self.run_command([*prefix, "create", "--name", "foreign-stopped", "--network", "offbox", "python:3.13-alpine", "sleep", "infinity"])
         self.run_command([*prefix, "network", "connect", "offbox", "offbox-smoke-web"])
         try:
             NoneDriver(nested, self.host).destroy()
@@ -380,6 +381,14 @@ class Smoke:
             require(False, "Teardown did not refuse an unrelated network endpoint")
         self.run_command([*prefix, "volume", "inspect", "offbox-probe-abcd-docker"])
         self.run_command([*prefix, "network", "disconnect", "offbox", "offbox-smoke-web"])
+        try:
+            NoneDriver(nested, self.host).destroy()
+        except ProviderError as exc:
+            require("unrelated attached" in exc.message, "Stopped foreign member caused an unexpected failure")
+        else:
+            require(False, "Teardown did not refuse a stopped unrelated network member")
+        self.run_command([*prefix, "volume", "inspect", "offbox-probe-abcd-docker"])
+        self.run_command([*prefix, "rm", "foreign-stopped"])
         NoneDriver(nested, self.host).destroy()
         self.run_command([*prefix, "network", "inspect", "offbox"], expected=1)
         self.run_command([*prefix, "volume", "inspect", "offbox-backup"])

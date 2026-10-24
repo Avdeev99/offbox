@@ -87,11 +87,12 @@ def test_foreign_network_endpoint_aborts_before_any_deletion() -> None:
                 prefix=["ssh"],
                 stdout=json.dumps([{"Name": "offbox", "Labels": {"offbox.managed": "1"}, "Containers": {"b" * 64: {"Name": "foreign"}}}]),
             ),
+            Script(prefix=["ssh"], stdout="b" * 64),
         ]
     )
     with pytest.raises(ProviderError, match="unrelated attached"):
         NoneDriver(runner, host()).destroy()
-    assert len(runner.calls) == 4
+    assert len(runner.calls) == 5
     assert all(" rm " not in call.argv[-1] for call in runner.calls)
 
 
@@ -114,3 +115,18 @@ def test_container_inventory_mismatch_aborts_before_any_deletion(identity: str, 
         NoneDriver(runner, host()).destroy()
     assert len(runner.calls) == 2
     assert all(" rm " not in call.argv[-1] for call in runner.calls)
+
+
+def test_stopped_foreign_network_member_aborts_before_deletion() -> None:
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], stdout=json.dumps([{"Name": "offbox", "Labels": {"offbox.managed": "1"}, "Containers": {}}])),
+            Script(prefix=["ssh"], stdout="b" * 64),
+        ]
+    )
+    with pytest.raises(ProviderError, match="unrelated attached"):
+        NoneDriver(runner, host()).destroy()
+    assert len(runner.calls) == 4
+    assert runner.calls[-1].argv[-1] == "docker ps -aq --no-trunc --filter network=offbox"

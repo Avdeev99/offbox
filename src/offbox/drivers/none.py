@@ -87,11 +87,15 @@ class NoneDriver:
                 if len(networks) != 1 or networks[0].name != "offbox":
                     raise ProviderError("Unexpected Docker network inventory", "Inspect the offbox network before retrying destruction.")
                 owned_network = (networks[0].labels or {}).get("offbox.managed") == "1"
-                if owned_network and set(networks[0].containers or {}) - set(containers):
-                    raise ProviderError(
-                        "Managed network has unrelated attached containers",
-                        "Inspect docker network inspect offbox and disconnect unrelated services before retrying destruction.",
-                    )
+                if owned_network:
+                    attached = self._run(["docker", "ps", "-aq", "--no-trunc", "--filter", "network=offbox"]).stdout.split()
+                    if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in attached):
+                        raise ProviderError("Invalid Docker network members", "Inspect network membership before retrying destruction.")
+                    if (set(attached) | set(networks[0].containers or {})) - set(containers):
+                        raise ProviderError(
+                            "Managed network has unrelated attached containers",
+                            f"Run offbox host ssh {self.host.name} -- docker ps -a --filter network=offbox; disconnect unrelated containers before retrying.",
+                        )
                 if not owned_network:
                     console.info("Preserving the adopted or unlabelled Docker network offbox")
             elif network_result.returncode != 1 or not any(
