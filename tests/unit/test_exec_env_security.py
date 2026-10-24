@@ -110,3 +110,14 @@ def test_override_values_are_redacted_regardless_of_name() -> None:
 def test_configured_exec_env_values_are_redacted_but_terminal_settings_are_not() -> None:
     execution_env(["SERVICE_URL"], {}, tty=True, local={"SERVICE_URL": "https://user:pw-z53@example.test", "TERM": "xterm-kitty-q81"})
     assert redact("https://user:pw-z53@example.test xterm-kitty-q81", {}) == "[REDACTED] xterm-kitty-q81"
+
+
+def test_short_forwarded_values_are_redacted_only_as_assignments() -> None:
+    execution_env(["HOME", "LANG"], {}, tty=False, local={"HOME": "/Users/me-q71", "LANG": "en_GB.UTF-8-q71"})
+    assert redact("-e HOME=/Users/me-q71 cd /Users/me-q71", {}) == "-e [REDACTED] cd /Users/me-q71"
+    assert redact("-e LANG=en_GB.UTF-8-q71 en_GB.UTF-8-q71", {}) == "-e [REDACTED] en_GB.UTF-8-q71"
+
+
+def test_secret_named_and_long_forwarded_values_are_redacted_anywhere() -> None:
+    parse_env(["API_TOKEN=short-k42", "SERVICE_URL=https://long-value.test/k42"])
+    assert redact("short-k42 https://long-value.test/k42", {}) == "[REDACTED] [REDACTED]"

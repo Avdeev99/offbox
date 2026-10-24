@@ -88,7 +88,7 @@ def uninstall(
     with ExitStack() as locks:
         for name in sorted(state.hosts):
             locks.enter_context(host_operation(paths, name))
-        SyncManager(runner).terminate_all()
+        SyncManager(runner, cache=paths.cache).terminate_all()
         for host in state.hosts.values():
             if host.address:
                 close_master(runner, host.name)

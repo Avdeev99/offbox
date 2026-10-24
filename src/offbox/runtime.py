@@ -280,7 +280,7 @@ class Runtime:
         self.runner = runner
         self.clock = clock or SystemClock()
         self.store = StateStore(paths.state)
-        self.sync = SyncManager(runner)
+        self.sync = SyncManager(runner, cache=paths.cache)
         self.ports = PortManager(paths, runner, clock=self.clock)
 
     def remote(self, host: HostState, argv: Sequence[str], *, check: bool = True, timeout: float = 30, input: str | None = None) -> Result:
@@ -412,7 +412,8 @@ class Runtime:
             result = self.mutate(host, work, "fresh" if fresh else "up", command, pull=dockerfile is None)
             container = self._container(result.stdout)
             self._owned(work, container)
-            drifted = (container.config.labels or {}).get(SETTINGS_LABEL) != settings_digest(command)
+            recorded_settings = (container.config.labels or {}).get(SETTINGS_LABEL)
+            drifted = recorded_settings is not None and recorded_settings != settings_digest(command)
             self.wait_ready(host, work, container)
             if fresh:
                 self.sync.ensure(work, host, project.sync)

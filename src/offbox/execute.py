@@ -42,6 +42,7 @@ _CREDENTIAL_ENV = frozenset(
 _PUBLIC_PROVIDER_ENV = frozenset({"GOOGLE_PROJECT"})
 INSTALL_WAIT_SECONDS = 600
 PORT_RESTORE_JOIN_SECONDS = 10
+INTERRUPTED_PORT_RESTORE_JOIN_SECONDS = 1
 _SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
@@ -181,7 +182,7 @@ export LC_ALL=C
 root=$1
 shift
 [ ! -L /srv/offbox/envs ] && [ ! -L "${root%/work}" ] && [ ! -L "$root" ] || exit 3
-cd -- "$root"
+cd -- "$root" || exit 3
 umask 077
 tmp=$(mktemp)
 trap 'rm -f -- "$tmp"' EXIT HUP INT TERM
@@ -272,7 +273,10 @@ if printf '%s\n' "$inspection" | jq -e --arg name "$name" --arg worktree "$workt
     and .[0].State.Running == true
 ' >/dev/null; then
     if [ "$probe" = 1 ]; then
-        install=$(offbox_hash "$work" "$@" && offbox_marker "$directory")
+        hashed=$(offbox_hash "$work" "$@")
+        marker=$(offbox_marker "$directory")
+        install="$hashed
+$marker"
     fi
     if [ "$discover" = 1 ]; then
         if ! compose=$(docker exec -u dev -w /work "$container" docker compose ps --format json 2>"$failure"); then
@@ -319,6 +323,7 @@ class Executor:
         self.runner = runner
         self.clock = clock or SystemClock()
         self.id_factory = id_factory or (lambda: uuid.uuid4().hex)
+        self.interrupted = False
 
     def _status(self, host: HostState, work: Worktree, run_id: str, *, timeout: float = 2) -> int | None:
         result = self.runner.run(
@@ -411,6 +416,7 @@ class Executor:
                         started()
                     while True:
                         if state.number is not None:
+                            self.interrupted = True
                             return self.interrupt(process, state, host, work, run_id)
                         observed = process.wait(timeout=0.1)
                         if observed is not None:
@@ -448,12 +454,16 @@ class Executor:
         """Yield whether the lock was contended, so callers re-check work another process may have finished."""
         validate_env_name(work.name)
         directory = self.paths.state / "install-locks"
+        failure = PreconditionError("Cannot acquire installation lock", "Check local state directory permissions and retry.")
         try:
             directory.mkdir(parents=True, mode=0o700, exist_ok=True)
             metadata = directory.lstat()
             if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
                 raise PreconditionError("Unsafe install lock directory", f"Restore an owned directory at {directory}.")
             descriptor = os.open(directory / work.name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        except OSError as exc:
+            raise failure from exc
+        try:
             try:
                 metadata = os.fstat(descriptor)
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
@@ -475,11 +485,11 @@ class Executor:
                         fix="Retry after the current installation finishes.",
                     )
                     waited = True
-                yield waited
-            finally:
-                os.close(descriptor)
-        except OSError as exc:
-            raise PreconditionError("Cannot acquire installation lock", "Check local state directory permissions and retry.") from exc
+            except OSError as exc:
+                raise failure from exc
+            yield waited
+        finally:
+            os.close(descriptor)
 
     def install_hash(self, work: Worktree, host: HostState, names: Sequence[str]) -> str:
         result = self._remote(host, ["sh", "-s", "--", work.work, *install_paths(names)], input=_HASH).strip()
@@ -511,6 +521,7 @@ class Executor:
         always: bool = False,
         env: Mapping[str, str] | None = None,
         probe: InstallProbe | None = None,
+        wait: float = INSTALL_WAIT_SECONDS,
     ) -> None:
         if config.command is None:
             return
@@ -519,7 +530,7 @@ class Executor:
             current = probe or self.install_probe(work, host, config.when)
             if current.marker == current.digest:
                 return
-        with self.installation_lock(work, wait=INSTALL_WAIT_SECONDS) as waited:
+        with self.installation_lock(work, wait=wait) as waited:
             if waited and not always:
                 current = self.install_probe(work, host, config.when)
                 if current.marker == current.digest:
@@ -535,7 +546,7 @@ class Executor:
             console.step("Installing project tools with mise")
             with stage("Project tools"):
                 self._stage(work, host, "mise install", env={**env, "MISE_YES": "1"})
-        self.install(work, host, project.install, always=True, env=env)
+        self.install(work, host, project.install, always=True, env=env, wait=0)
         stack, _ = project.stack.commands(work.root)
         if stack and not no_stack:
             console.step("Starting project stack")
@@ -600,13 +611,10 @@ class Executor:
             with host_operation(self.paths, host.name, clock=self.clock):
                 manager.restore(work, host, config, snapshot=snapshot, warn=warnings.append)
         except OffboxError as exc:
-            logger.info("port restore skipped", exc_info=True)
             if isinstance(exc.__cause__, BlockingIOError):
-                warnings.append(
-                    "Port forwards were not restored because another offbox operation is running. "
-                    "Fix: run offbox ports after it finishes; the next offbox exec also restores them."
-                )
+                logger.info("port restore skipped because another host operation holds the lock")
             else:
+                logger.info("port restore skipped", exc_info=True)
                 warnings.append(f"Port forwards were not restored: {exc.message}. Fix: {exc.fix or 'run offbox ports.'}")
         except Exception:
             logger.exception("unexpected port restore failure")
@@ -676,7 +684,7 @@ class Executor:
                 )
         finally:
             if worker.is_alive():
-                worker.join(PORT_RESTORE_JOIN_SECONDS)
+                worker.join(INTERRUPTED_PORT_RESTORE_JOIN_SECONDS if self.interrupted else PORT_RESTORE_JOIN_SECONDS)
             for message in warnings:
                 console.warn(message)
             if worker.is_alive():

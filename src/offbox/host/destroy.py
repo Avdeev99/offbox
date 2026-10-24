@@ -30,14 +30,15 @@ def _best_effort(action: Callable[[], None], warning: str) -> None:
         console.warn(f"{warning} ({exc.message})")
 
 
-def _release_local(runner: Runner, host: HostState, envs: dict[str, EnvState], *, strict: bool) -> None:
+def _release_local(runner: Runner, cache: Path, host: HostState, envs: dict[str, EnvState], *, strict: bool) -> None:
+    sync = SyncManager(runner, cache=cache)
     for env in envs.values():
         work = Worktree(root=env.worktree_path, name=env.name)
         if strict:
-            SyncManager(runner).terminate(work, host)
+            sync.terminate(work, host)
         else:
             _best_effort(
-                partial(SyncManager(runner).terminate, work, host),
+                partial(sync.terminate, work, host),
                 f"Cannot stop source sync for {env.name}; afterwards run mutagen sync list and terminate offbox-{env.name} if it remains",
             )
     if not host.address:
@@ -90,7 +91,7 @@ def _destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, exec
     for env in envs.values():
         if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,36}", env.name) is None:
             raise PreconditionError("Invalid stored environment name", "Repair the environment state before destroying its host.")
-    _release_local(runner, host, envs, strict=existing and not forget)
+    _release_local(runner, paths.cache, host, envs, strict=existing and not forget)
     if existing and not forget:
         NoneDriver(runner, host).destroy()
         _best_effort(

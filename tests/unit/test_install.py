@@ -220,3 +220,22 @@ def test_no_implicit_package_detection_or_stack_down(tmp_path: Path) -> None:
     (tmp_path / "package.json").write_text("{}")
     executor.up_stages(work, host, ProjectConfig.model_validate({"stack": {"down": "must-not-run"}}))
     assert isinstance(executor.runner, FakeRunner) and executor.runner.calls == []
+
+
+def test_installation_lock_does_not_relabel_errors_from_its_body(tmp_path: Path) -> None:
+    executor, work, _ = context(tmp_path)
+    with pytest.raises(FileNotFoundError, match="body failure"), executor.installation_lock(work):
+        raise FileNotFoundError("body failure")
+    with executor.installation_lock(work) as waited:
+        assert waited is False
+
+
+def test_up_fails_fast_instead_of_waiting_for_a_running_install(tmp_path: Path) -> None:
+    executor, work, host = context(tmp_path)
+    runner = FakeRunner()
+    executor.runner = runner
+    project = ProjectConfig.model_validate({"install": {"command": "npm ci", "when": ["lock"]}})
+    with executor.installation_lock(work), pytest.raises(PreconditionError, match="Installation is already running") as caught:
+        executor.up_stages(work, host, project)
+    assert caught.value.fix == "Retry after the current installation finishes."
+    assert runner.calls == []

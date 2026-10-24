@@ -13,7 +13,7 @@ from offbox.paths import Paths
 
 _registered_secrets: set[str] = set()
 _SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY|CREDENTIALS|KEYFILE_JSON)$", re.IGNORECASE)
-_STANDALONE_VALUE_LENGTH = 8
+_STANDALONE_VALUE_LENGTH = 20
 _NO_LOG_OPTIONS = frozenset({"--help", "--version"})
 _invocation: ContextVar[str] = ContextVar("offbox_invocation", default="")
 _environment: ContextVar[str | None] = ContextVar("offbox_environment", default=None)
@@ -66,14 +66,16 @@ def register_secrets(env: Mapping[str, str]) -> None:
 
 
 def register_env_values(env: Mapping[str, str]) -> None:
-    """Redact forwarded values regardless of name; short values only as NAME=value to keep logs readable."""
+    """Redact forwarded values as NAME=value; on their own only for secret-looking names or long values, so paths stay readable."""
     for name, value in env.items():
         if not value:
             continue
-        standalone = len(value) >= _STANDALONE_VALUE_LENGTH or _SECRET_NAME.search(name) is not None
-        secret = value if standalone else f"{name}={value}"
-        _registered_secrets.add(secret)
-        _registered_secrets.update(part for part in secret.splitlines() if part and (standalone or len(part) >= _STANDALONE_VALUE_LENGTH))
+        named = _SECRET_NAME.search(name) is not None
+        standalone = named or len(value) >= _STANDALONE_VALUE_LENGTH
+        _registered_secrets.add(f"{name}={value}")
+        if standalone:
+            _registered_secrets.add(value)
+        _registered_secrets.update(part for part in value.splitlines() if part and (named or len(part) >= _STANDALONE_VALUE_LENGTH))
 
 
 def register_exec_secrets(argv: Sequence[str]) -> None:

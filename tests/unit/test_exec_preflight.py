@@ -3,7 +3,7 @@ import json
 import os
 import shlex
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -130,7 +130,7 @@ def test_busy_host_lock_skips_port_restore_without_waiting_and_runs_the_command(
     assert status == 7
     assert clock.sleeps == []
     assert [call.argv[:3] for call in runner.calls if call.argv[:2] == ["ssh", "-O"]] == []
-    assert "another offbox operation is running" in capsys.readouterr().err
+    assert "Port forwards" not in capsys.readouterr().err
 
 
 def test_port_restore_failure_warns_and_never_changes_the_command_status(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -232,7 +232,7 @@ def test_one_preflight_round_trip_carries_ownership_install_probe_and_compose_po
 
 def test_preflight_script_runs_compose_and_probe_only_for_an_owned_running_container() -> None:
     gate = PREFLIGHT_SCRIPT.index(".[0].State.Running == true")
-    assert PREFLIGHT_SCRIPT.index('install=$(offbox_hash "$work" "$@" && offbox_marker "$directory")') > gate
+    assert PREFLIGHT_SCRIPT.index('hashed=$(offbox_hash "$work" "$@")\n        marker=$(offbox_marker "$directory")') > gate
     assert PREFLIGHT_SCRIPT.index("docker compose ps --format json") > gate
     assert "no such container" in PREFLIGHT_SCRIPT
     assert "compose_failed=true" in PREFLIGHT_SCRIPT
@@ -324,3 +324,64 @@ def test_uncontended_install_uses_the_preflight_probe_without_reprobing(tmp_path
     assert "npm ci" in runner.calls[2].argv[-1]
     assert runner.calls[4].argv[-1].endswith("b" * 64)
     assert "pytest" in runner.calls[5].argv[-1]
+
+
+def test_interrupted_exec_waits_only_briefly_for_an_unfinished_port_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from offbox import execute
+
+    paths, root, name = setup(tmp_path)
+    release = threading.Event()
+    joins: list[float | None] = []
+
+    class RecordingThread(threading.Thread):
+        def join(self, timeout: float | None = None) -> None:
+            joins.append(timeout)
+
+    executor = Executor(
+        paths, FakeRunner([Script(prefix=["git"], stdout=str(root)), Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name))])
+    )
+
+    def run(*_args: object, started: Callable[[], None] | None = None, **_kwargs: object) -> int:
+        assert started is not None
+        started()
+        executor.interrupted = True
+        return 130
+
+    def restore_ports(*_args: object) -> list[str]:
+        assert release.wait(5)
+        return []
+
+    monkeypatch.setattr(executor, "run", run)
+    monkeypatch.setattr(executor, "restore_ports", restore_ports)
+    monkeypatch.setattr(threading, "Thread", RecordingThread)
+    try:
+        assert executor.execute(ExecOptions(command=["pytest"], no_sync=True), cwd=root) == 130
+    finally:
+        release.set()
+    assert joins == [execute.INTERRUPTED_PORT_RESTORE_JOIN_SECONDS]
+    assert "Port forwards are still being restored" in capsys.readouterr().err
+
+
+@pytest.mark.subprocess
+def test_preflight_script_stops_when_the_install_probe_cannot_enter_the_worktree(tmp_path: Path) -> None:
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text("#!/bin/sh\nprintf '[]\\n'\n")
+    (bin_dir / "jq").write_text("#!/bin/sh\nprintf '{}\\n'\n")
+    for tool in ("docker", "jq"):
+        (bin_dir / tool).chmod(0o755)
+    missing = tmp_path / "missing" / "work"
+    result = subprocess.run(
+        ["sh", "-s", "--", "env", str(tmp_path), "offbox-env", "1", "0", str(missing), str(tmp_path / "missing"), "lock"],
+        input=PREFLIGHT_SCRIPT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+        timeout=30,
+    )
+    assert (result.returncode, result.stdout) == (3, "")

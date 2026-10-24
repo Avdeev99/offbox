@@ -54,7 +54,7 @@ def test_settings_label_hashes_only_container_shaping_values() -> None:
     assert settings_digest([*command[:-1], "registry/image:other"]) != settings_digest(command)
 
 
-@pytest.mark.parametrize(("settings", "warned"), [(None, True), ("0" * 32, True), ("expected", False)])
+@pytest.mark.parametrize(("settings", "warned"), [(None, False), ("0" * 32, True), ("expected", False)])
 def test_up_warns_when_an_existing_container_has_different_settings(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], settings: str | None, warned: bool
 ) -> None:
@@ -168,3 +168,8 @@ def test_stop_wait_for_the_host_lock_is_bounded(tmp_path: Path) -> None:
             Runtime(paths, runner, clock).stop(cwd=root)
     assert clock.elapsed == pytest.approx(10)
     assert len(runner.calls) == 1
+
+
+def test_runtime_sync_uses_the_configured_cache(tmp_path: Path) -> None:
+    paths, _host, _root = runtime_setup(tmp_path)
+    assert Runtime(paths, FakeRunner(), FakeClock()).sync.cache == paths.cache
