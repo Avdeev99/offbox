@@ -1,8 +1,8 @@
 import csv
 import io
 import logging
-import shutil
 import subprocess
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -13,10 +13,12 @@ from offbox import console
 from offbox.config import Model, SyncConfig
 from offbox.errors import CommandFailed, PreconditionError
 from offbox.naming import Worktree, validate_env_name
+from offbox.paths import Paths
 from offbox.providers import validate_name
 from offbox.runner import Result, Runner
 from offbox.state import HostState
 from offbox.timings import measured
+from offbox.tools import MUTAGEN_FIX, MutagenMissing, cached_mutagen, download_prompt, install_mutagen
 
 logger = logging.getLogger(__name__)
 
@@ -194,24 +196,43 @@ def create_command(work: Worktree, host: HostState, config: SyncConfig) -> list[
 
 
 class SyncManager:
-    def __init__(self, runner: Runner) -> None:
+    def __init__(self, runner: Runner, *, cache: Path | None = None, offer: Callable[[str], bool] | None = None) -> None:
         self.runner = runner
+        self.cache = cache
+        self.offer = offer
+        self.executable = "mutagen"
 
-    def _run(self, argv: list[str], *, timeout: float = 30) -> Result:
+    def _locate(self, install: bool) -> str:
+        cache = self.cache or Paths.discover().cache
+        cached = cached_mutagen(cache)
+        if cached is not None:
+            return str(cached)
+        offer = self.offer or (console.confirm if console.interactive() else None)
+        if install and offer is not None and offer(download_prompt(cache)):
+            return str(install_mutagen(cache))
+        raise MutagenMissing("Mutagen is not installed", MUTAGEN_FIX)
+
+    def _run(self, argv: list[str], *, timeout: float = 30, install: bool = True) -> Result:
+        command = [self.executable, *argv[1:]]
         try:
-            result = self.runner.run(argv, check=False, timeout=timeout)
+            result = self.runner.run(command, check=False, timeout=timeout)
         except PreconditionError as exc:
+            if isinstance(exc.__cause__, FileNotFoundError) and self.executable == "mutagen":
+                self.executable = self._locate(install)
+                return self._run(argv, timeout=timeout, install=install)
             if isinstance(exc.__cause__, subprocess.TimeoutExpired):
                 raise PreconditionError("Source sync timed out", "Check sync conflicts and host connectivity, then run offbox up.") from exc
             raise
         if result.returncode:
-            failure = CommandFailed(argv, result.returncode, result.stderr)
+            failure = CommandFailed(command, result.returncode, result.stderr)
             failure.fix = "Check the Mutagen daemon and SSH connectivity, then run offbox up."
             raise failure
         return result
 
-    def status(self, work: Worktree, host: HostState | None = None) -> SyncSession | None:
-        result = self._run(["mutagen", "sync", "list", "--label-selector", f"offbox-env={work.name}", "--template", "{{ json . }}"])
+    def status(self, work: Worktree, host: HostState | None = None, *, install: bool = True) -> SyncSession | None:
+        result = self._run(
+            ["mutagen", "sync", "list", "--label-selector", f"offbox-env={work.name}", "--template", "{{ json . }}"], install=install
+        )
         try:
             sessions = TypeAdapter(list[SyncSession]).validate_json(result.stdout)
         except ValidationError as exc:
@@ -268,6 +289,17 @@ class SyncManager:
 
     @measured("Sync flush")
     def flush(self, work: Worktree, host: HostState | None = None) -> None:
+        try:
+            self._run(["mutagen", "sync", "flush", "--label-selector", f"offbox-env={work.name}"], timeout=120)
+        except CommandFailed:
+            logger.info("label flush failed for %s; inspecting the session", work.name, exc_info=True)
+            self._recover_and_flush(work, host)
+        current = self.status(work, host)
+        if current is None:
+            raise PreconditionError("No source sync session", "Run offbox up in this worktree.")
+        self._raise_health(current)
+
+    def _recover_and_flush(self, work: Worktree, host: HostState | None) -> None:
         session = self.status(work, host)
         if session is None:
             raise PreconditionError("No source sync session", "Run offbox up in this worktree.")
@@ -282,12 +314,6 @@ class SyncManager:
         ):
             self._raise_health(session)
         self._run(["mutagen", "sync", "flush", session.identifier], timeout=120)
-        current = self.status(work, host)
-        if current is None:
-            raise PreconditionError("Source sync session disappeared during flush", "Run offbox up again.")
-        if current.identifier != session.identifier:
-            raise PreconditionError("Source sync session changed during flush", "Wait for other sync operations and retry offbox up.")
-        self._raise_health(current)
 
     def _raise_health(self, session: SyncSession) -> None:
         report = health(session)
@@ -297,14 +323,11 @@ class SyncManager:
 
     def _cleanup(self, action: Literal["pause", "terminate"], work: Worktree, host: HostState | None) -> None:
         try:
-            session = self.status(work, host)
+            session = self.status(work, host, install=False)
             if session is not None and (action == "terminate" or not session.paused):
-                self._run(["mutagen", "sync", action, session.identifier])
-        except PreconditionError as exc:
-            if isinstance(exc.__cause__, FileNotFoundError) and shutil.which("mutagen") is None:
-                console.warn(f"Mutagen is not installed; continuing cleanup without sync {action}.")
-                return
-            raise
+                self._run(["mutagen", "sync", action, session.identifier], install=False)
+        except MutagenMissing:
+            console.warn(f"Mutagen is not installed; continuing cleanup without sync {action}.")
 
     @measured("Sync pause")
     def pause(self, work: Worktree, host: HostState | None = None) -> None:
@@ -316,12 +339,10 @@ class SyncManager:
 
     def terminate_all(self) -> None:
         try:
-            result = self._run(["mutagen", "sync", "list", "--label-selector", "offbox-env", "--template", "{{ json . }}"])
-        except PreconditionError as exc:
-            if isinstance(exc.__cause__, FileNotFoundError) and shutil.which("mutagen") is None:
-                console.warn("Mutagen is not installed; continuing local cleanup without terminating sync sessions.")
-                return
-            raise
+            result = self._run(["mutagen", "sync", "list", "--label-selector", "offbox-env", "--template", "{{ json . }}"], install=False)
+        except MutagenMissing:
+            console.warn("Mutagen is not installed; continuing local cleanup without terminating sync sessions.")
+            return
         try:
             sessions = TypeAdapter(list[SyncSession]).validate_json(result.stdout)
         except ValidationError as exc:
