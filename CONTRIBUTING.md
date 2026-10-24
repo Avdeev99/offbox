@@ -21,7 +21,23 @@ make test
 | `make test` | Deterministic unit tests; excludes the subprocess marker |
 | `uv build` | Build the source distribution and wheel |
 
-Unit CI covers Ubuntu and macOS with Python 3.12 and 3.13. Validation also runs lint, strict type checks, distribution builds, image builds and one focused native Linux Docker smoke job. Do not add real-cloud tests or require real cloud credentials for tests.
+Unit CI covers Ubuntu and macOS with Python 3.12 and 3.13. Validation also runs lint, strict type checks, distribution builds, ShellCheck, provider schema validation with mocked Terraform tests, image builds and one focused native Linux Docker smoke job. Do not add real-cloud tests or require real cloud credentials for tests. Cloud API provisioning and VM bootstrap are not exercised by CI; browser, OOM and performance tests are outside its scope.
+
+Provider checks run without cloud credentials:
+
+```sh
+terraform fmt -check -recursive providers
+terraform -chdir=providers/hetzner init -backend=false
+terraform -chdir=providers/hetzner validate
+terraform -chdir=providers/hetzner test
+terraform -chdir=providers/gcp init -backend=false
+terraform -chdir=providers/gcp validate
+terraform -chdir=providers/gcp test
+```
+
+Each provider commits a `.terraform.lock.hcl` covering Linux and macOS on amd64/arm64. After changing a provider version constraint, refresh it with `terraform providers lock` for those four platforms.
+
+Separately approved [Hetzner](docs/benchmarks/2026-10-23-hetzner.md) and [Google Cloud](docs/benchmarks/2026-10-23-gcp.md) benchmarks exercised provisioning and both sample apps, including browser tests, then verified cloud cleanup. Measurements and comparison limits are recorded in the reports.
 
 The Docker smoke job builds and loads the universal image from the current checkout. It uses disposable SSH keys and containers to exercise real SSH, Mutagen, stream/status/signal handling, forwarding and two isolated Compose stacks. It does not create cloud resources or establish VM bootstrap or browser behavior. Its cleanup uses fixture ownership labels and markers; failure logs are retained as a short-lived Actions artifact. The fixture is intended for a disposable native amd64 Linux runner with a Docker daemon and `/srv/offbox/envs` available. Its commands are in [smoke.yaml](.github/workflows/smoke.yaml); do not run it on an existing Offbox host. Unit tests remain independent of Docker and network access.
 
@@ -34,13 +50,15 @@ uvx pre-commit install
 uvx pre-commit run --all-files
 ```
 
-Read [AGENTS.md](AGENTS.md) for code rules. Use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`), one PR per milestone, targeting `master`. Include the milestone's acceptance criteria as a checked list with command-output evidence in each PR. Run `make check` and `make test` before pushing. Never commit secrets. Tests never need real credentials or billable cloud resources.
+## Pull requests
+
+Read [AGENTS.md](AGENTS.md) for code rules. Use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`) and keep each PR focused on one change, targeting `master`. Describe what changed and how you verified it, including the commands you ran and relevant output. Run `make check` and `make test` before pushing. Never commit secrets. Tests never need real credentials or billable cloud resources.
 
 The repository keeps host scripts, image files and provider definitions at the root. Hatch force-includes them in wheels under `offbox/_data/host`, `offbox/_data/images` and `offbox/_data/providers`; runtime code must use `importlib.resources` to locate them. The universal image is built separately from the Python wheel.
 
 ## Future one-time PyPI setup
 
-PyPI publishing is deferred by the maintainer. Do not create `v*` release tags until publishing is explicitly resumed. Source installs, wheel builds and master-branch GHCR publication remain available. The following setup is retained for that future release.
+The package is not yet published to PyPI, and `v*` release tags are blocked until the maintainer enables publishing. Source installs, wheel builds and master-branch GHCR publication are available. The following setup applies to the first release.
 
 The maintainer must configure a [pending trusted publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/) before the first release. A pending publisher does not reserve the project name; the first successful upload creates it.
 
@@ -55,7 +73,7 @@ The maintainer must configure a [pending trusted publisher](https://docs.pypi.or
    | Workflow filename | `release.yaml` |
    | Environment name | `pypi` |
 
-3. The `pypi` environment is restricted to `v*` tags. Review its approval policy and explicitly update the release-tag ruleset that currently blocks those tags before resuming publication.
+3. The `pypi` environment is restricted to `v*` tags. Review its approval policy and explicitly update the release-tag ruleset that currently blocks those tags before the first release.
 4. Ensure GitHub Actions is enabled. Only the artifact-consuming publish job requests `id-token: write` for OIDC and `contents: write` for the GitHub release; build/test jobs use read-only permissions. No PyPI API token or password is needed.
 
 For later releases, manage the publisher under the existing PyPI project's Publishing settings. See [PyPI's trusted-publisher documentation](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
@@ -64,8 +82,8 @@ For later releases, manage the publisher under the existing PyPI project's Publi
 
 1. Set `__version__` in `src/offbox/__init__.py` and add the matching dated section in `CHANGELOG.md`.
 2. Run `uv sync --frozen`, `make check`, `make test` and `uv build`. Install the wheel in an isolated environment and check both version forms.
-3. Merge the milestone PR after CI succeeds. For the first release, confirm that the PyPI setup above is complete.
-4. Once publishing is resumed, create and push a tag matching the package version. This starts `.github/workflows/release.yaml`.
+3. Merge the release PR after CI succeeds. For the first release, confirm that the PyPI setup above is complete.
+4. Once publishing is enabled, create and push a tag matching the package version. This starts `.github/workflows/release.yaml`.
 5. The workflow checks the tag against the package version, extracts that version's changelog section, builds and smoke-tests the wheel, then runs `uv publish --trusted-publishing always`. It creates the GitHub release using the same changelog section and attaches the distributions.
 6. Verify `uvx --refresh offbox --version` prints the released version and inspect the release on PyPI and GitHub.
 
@@ -78,6 +96,6 @@ The image workflow builds `linux/amd64` from `images/universal/Dockerfile`. Pull
 
 After the first successful publication, open the repository's linked `offbox-universal` package on GitHub, choose **Package settings → Change visibility → Public**, and confirm the change. This is a one-time maintainer action; hosts need anonymous pull access. Ensure the package is linked to this repository and its Actions access allows this repository to write. The workflow uses only `GITHUB_TOKEN` with `packages: write`; no cloud credential or registry password is needed. See [GitHub's package visibility instructions](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
 
-Image compatibility series `1` is distinct from the CLI release number. A future CLI `v0.1.0` release publishes image aliases `:0.1.0` and `:1.0.0` in addition to the compatibility and commit tags, as recorded in the implementation issue's version clarification. Those release-tag aliases are deferred along with PyPI publication; the public compatibility image is already available.
+Image compatibility series `1` is distinct from the CLI release number. A future CLI `v0.1.0` release publishes image aliases `:0.1.0` and `:1.0.0` in addition to the compatibility and commit tags. A weekly scheduled run on `master` rebuilds and republishes the compatibility and commit tags so the image picks up Ubuntu security updates.
 
-Each successful build writes the actual compressed OCI image size to its Actions summary and an `image-size` artifact. Copy that measured result into the milestone PR; the target is below 3 GB. The report sums the compressed layer and configuration descriptors for the amd64 image and excludes attestations. Build/static checks do not prove nested Docker, browser or signal behavior at runtime. See [the image build guide](docs/universal-image.md) for contents and process contracts.
+Each successful build writes the actual compressed OCI image size to its Actions summary and an `image-size` artifact. Include the measured result in PRs that change the image; the target is below 3 GB. The report sums the compressed layer and configuration descriptors for the amd64 image and excludes attestations. Build/static checks do not prove nested Docker, browser or signal behavior at runtime. See [the image build guide](docs/universal-image.md) for contents and process contracts.

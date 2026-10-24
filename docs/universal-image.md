@@ -10,7 +10,7 @@ The `dev` user has UID/GID 1000, passwordless sudo and Docker access. This image
 | --- | --- |
 | Python | uv-managed Python 3.13, default Python command |
 | uv | 0.13.5, including uvx |
-| Python tooling | pipx and Poetry installed through uv tools |
+| Python tooling | pipx from Ubuntu packages; Poetry installed as a uv tool |
 | Node.js | 22.23.4 LTS, with Corepack for pnpm/yarn |
 | Bun | 1.4.4, amd64 baseline build |
 | Go | 1.27.3 |
