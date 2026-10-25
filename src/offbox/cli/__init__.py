@@ -28,6 +28,7 @@ class ErrorGroup(TyperGroup):
         log_path = paths.log_file()
         try:
             register_exec_secrets(args)
+            paths.secure_roots()
             configure(paths, [info_name or "offbox", *args])
             return super().make_context(info_name, args, parent, **extra)
         except ClickException as exc:
@@ -54,6 +55,10 @@ class ErrorGroup(TyperGroup):
             raise Exit(exc.exit_code) from exc
         except (Exit, Abort):
             raise
+        except KeyboardInterrupt as exc:
+            logger.warning("offbox interrupted", exc_info=True)
+            console.warn("Interrupted")
+            raise Exit(130) from exc
         except Exception as exc:
             logger.exception("unexpected failure")
             console.error(f"unexpected error, see {log_path}", "Check the log and report this error.")

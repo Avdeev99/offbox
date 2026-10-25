@@ -62,11 +62,20 @@ Recognized root Compose filenames are `compose.yaml`, `compose.yml`, `docker-com
 
 `up` explicitly runs the install stage. Later `exec` calls rerun it only when its stored ordered hash changes. The marker lives outside source at `/srv/offbox/envs/<env>/.offbox/install.sha256`; see [the hash and coordination contract](agents.md#dependency-installation). `exec --no-sync` uses the already-synced remote files without a hidden flush.
 
-A custom Dockerfile image is cached by project-path and Dockerfile-content hashes. Other build-context changes alone do not invalidate this cache. An existing container retains its image until `up --fresh`; that command replaces its Docker data volume while keeping synchronized code.
+A custom Dockerfile image is cached by project-path and Dockerfile-content hashes. Other build-context changes alone do not invalidate this cache. An existing container retains its image until `up --fresh`; that command replaces its Docker data volume while keeping synchronized code, so it asks for confirmation on a terminal and needs `--yes` otherwise.
 
 ### Sync and environment variables
 
 Default ignores cover dependency/cache/build directories: `node_modules`, `.venv`, `venv`, `__pycache__`, `*.pyc`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `dist`, `build`, `.next`, `.nuxt`, `target`, `.terraform`, `.DS_Store`, and mandatory `.git`. Project patterns retain their order and repetitions so later patterns can override earlier ones. Mandatory `.git` is moved to the end once. Offbox also enables VCS-directory ignoring. Linked worktrees' regular `.git` files are excluded too, including when project patterns use negation. Offbox sessions ignore unrelated global Mutagen defaults.
+
+Patterns use Mutagen's default ignore syntax. A pattern without a `/`, such as `build` or `target`, matches that name at any depth, so the defaults also exclude source directories like `src/build/` or `packages/api/dist/`. A pattern with a `/` is relative to the worktree root, and a leading `!` re-includes a path matched by an earlier pattern. Project patterns are applied after the defaults, so a nested source directory can be re-included:
+
+```toml
+[sync]
+ignore = ["!src/build", "!tools/target"]
+```
+
+A negated pattern re-includes only the named path; files inside a directory that is still ignored stay ignored. Use `/build` to ignore a root-level directory only.
 
 `.gitignore` is not a secret filter. Add `.env` or other sensitive paths explicitly to `sync.ignore` when they must stay local. Files created remotely, such as lockfiles and formatter output, sync back under two-way-safe conflict handling.
 
@@ -96,9 +105,9 @@ ssh_key = "~/.ssh/id_ed25519"
 | `hosts.NAME.image` | Provider default | Cloud operating-system image, distinct from `env.image`; Hetzner defaults to `ubuntu-24.04`. |
 | `hosts.NAME.address` | Unset | Accepted existing-host address field; `host init` requires its target explicitly and does not read this preset. |
 | `hosts.NAME.port` | `22` | Accepted existing-host port field; pass `--port` explicitly to `host init` when different from 22. |
-| `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519` | Local private-key path used by `host create`. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
+| `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519`, or `~/.ssh/offbox_ed25519` when only that key exists | Local private-key path used by `host create`; `host init` uses the same default. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
 
-`host init` does not load host presets. Pass `USER@ADDRESS`, any nondefault `--port`, and `--ssh-key` explicitly, for example `offbox host init dev@192.0.2.10 --name home --port 2222 --ssh-key ~/.ssh/home --accept-host-key`.
+`host init` does not load host presets. Pass `USER@ADDRESS`, any nondefault `--port`, and `--ssh-key` explicitly, for example `offbox host init dev@192.0.2.10 --name home --port 2222 --ssh-key ~/.ssh/home --host-key-fingerprint SHA256:...`.
 
 A registered environment always uses its recorded host. Changing the default does not move it. Remove that environment before selecting another host with `up --host NAME`.
 

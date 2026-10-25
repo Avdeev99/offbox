@@ -1,6 +1,7 @@
 import os
 import re
 import shlex
+import stat
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -45,13 +46,16 @@ def close_master(runner: Runner, name: str) -> None:
 def write_private(path: Path, content: str) -> None:
     temporary: Path | None = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as target:
+        destination = path.resolve() if path.is_symlink() else path
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        mode = stat.S_IMODE(destination.stat().st_mode) if destination.exists() else 0o600
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent, delete=False) as target:
             temporary = Path(target.name)
             target.write(content)
             target.flush()
             os.fsync(target.fileno())
-        os.replace(temporary, path)
+        temporary.chmod(mode)
+        os.replace(temporary, destination)
     except OSError as exc:
         raise PreconditionError(f"Cannot write {path}", "Check directory permissions and free disk space.") from exc
     finally:
@@ -71,7 +75,7 @@ def validate_user(user: str) -> str:
     return user
 
 
-def _quote(value: Path) -> str:
+def quote_path(value: Path) -> str:
     text = str(value)
     if any(char in text for char in "\r\n\0"):
         raise PreconditionError("Unsafe path in SSH configuration", "Choose a path without control characters.")
@@ -79,7 +83,7 @@ def _quote(value: Path) -> str:
 
 
 def include_line(paths: Paths) -> str:
-    return f"Include {_quote(paths.config / 'ssh_config')}"
+    return f"Include {quote_path(paths.config / 'ssh_config')}"
 
 
 def remove_include(paths: Paths, config: Path | None = None) -> None:
@@ -114,6 +118,16 @@ def ensure_include(paths: Paths, config: Path | None = None) -> None:
         console.info(f"Added offbox Include at the top of {target}")
 
 
+def default_ssh_key() -> Path:
+    """~/.ssh/id_ed25519 unless only the dedicated ~/.ssh/offbox_ed25519 that setup creates exists."""
+    directory = Path.home() / ".ssh"
+    default = directory / "id_ed25519"
+    dedicated = directory / "offbox_ed25519"
+    if not default.exists() and not default.with_name("id_ed25519.pub").exists() and dedicated.exists():
+        return dedicated
+    return default
+
+
 def sync_config(paths: Paths, state: State) -> None:
     control = paths.ensure_control()
     blocks: list[str] = []
@@ -129,14 +143,17 @@ def sync_config(paths: Paths, state: State) -> None:
             f"  HostName {host.address}\n"
             f"  User {host.ssh_user}\n"
             f"  Port {host.ssh_port}\n"
-            f"  IdentityFile {_quote(key)}\n"
-            f"  UserKnownHostsFile {_quote(host.known_hosts_path)}\n"
+            f"  IdentityFile {quote_path(key)}\n"
+            f"  UserKnownHostsFile {quote_path(host.known_hosts_path)}\n"
             f"  HostKeyAlias offbox-{name}\n"
             "  HostKeyAlgorithms ssh-ed25519\n"
             "  StrictHostKeyChecking yes\n"
             "  BatchMode yes\n"
+            "  IdentitiesOnly yes\n"
+            "  ForwardAgent no\n"
+            "  ForwardX11 no\n"
             "  ControlMaster auto\n"
-            f"  ControlPath {_quote(control / '%C').replace('%%C', '%C')}\n"
+            f"  ControlPath {quote_path(control / '%C').replace('%%C', '%C')}\n"
             "  ControlPersist 30m\n"
             "  ServerAliveInterval 15\n"
             "  ServerAliveCountMax 4\n"

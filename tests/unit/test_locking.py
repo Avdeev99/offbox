@@ -4,13 +4,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner
 
 from offbox.errors import PreconditionError
 from offbox.host import host_operation
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.ports import PortManager
-from offbox.runner import FakeRunner
 from offbox.state import EnvState, HostState, State, StateStore
 
 

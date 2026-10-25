@@ -1,10 +1,14 @@
+import shlex
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.errors import ConnectionError_, OffboxError, PreconditionError
+from offbox.host.ready import READY_PROBE
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Runner, Script
+from offbox.runner import Runner
+from offbox.state import HostState
 
 
 def paths_at(root: Path) -> Paths:
@@ -35,6 +39,7 @@ def test_tofu_exact_commands_and_output(tmp_path: Path) -> None:
                 prefix=["tofu", "output"],
                 stdout='{"ip":{"value":"192.0.2.1","type":"string","sensitive":false},"ssh_user":{"value":"offbox","type":"string","sensitive":false}}',
             ),
+            Script(prefix=["tofu", "init"]),
             Script(prefix=["tofu", "destroy"]),
         ]
     )
@@ -59,8 +64,10 @@ def test_tofu_exact_commands_and_output(tmp_path: Path) -> None:
         ["tofu", "init", "-input=false"],
         ["tofu", "apply", "-auto-approve", "-input=false"],
         ["tofu", "output", "-json"],
+        ["tofu", "init", "-input=false"],
         ["tofu", "destroy", "-auto-approve", "-input=false"],
     ]
+    assert all(call.interruptible for call in runner.calls)
     assert all(call.cwd == workspace for call in runner.calls)
     assert runner.calls[0].env == {
         "HCLOUD_TOKEN": "synthetic-test-token",
@@ -89,13 +96,14 @@ def test_ssh_include_idempotent_and_preserves_user_config(tmp_path: Path) -> Non
     config = tmp_path / "home/.ssh/config"
     config.parent.mkdir(parents=True)
     config.write_text("Host personal\n  HostName example.com\n")
+    config.chmod(0o640)
     ensure_include(paths, config)
     first = config.read_text()
     ensure_include(paths, config)
     assert config.read_text() == first
     assert first.endswith("Host personal\n  HostName example.com\n")
     assert first.count("Include ") == 1
-    assert config.stat().st_mode & 0o777 == 0o600
+    assert config.stat().st_mode & 0o777 == 0o640
 
 
 class FakeClock:
@@ -216,7 +224,7 @@ def test_destroy_retains_workspace_and_state_when_provider_fails(tmp_path: Path)
         phase="creating",
     )
     StateStore(paths.state).write(State(hosts={"main": host}))
-    runner = FakeRunner([Script(prefix=["tofu", "destroy"], returncode=1, stderr="provider offline")])
+    runner = FakeRunner([Script(prefix=["tofu", "init"]), Script(prefix=["tofu", "destroy"], returncode=1, stderr="provider offline")])
     with pytest.raises(OffboxError):
         destroy_host(paths, runner, "main", executable=Path("tofu"))
     assert StateStore(paths.state).read().hosts["main"] == host
@@ -370,6 +378,7 @@ def test_create_refreshes_bootstrap_login_and_checks_docker_before_ready(
                 stderr="permission denied" if docker_exit else "",
             ),
             Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
+            Script(prefix=["tofu", "init"]),
             Script(prefix=["tofu", "destroy"]),
         ]
     )
@@ -396,11 +405,12 @@ def test_create_refreshes_bootstrap_login_and_checks_docker_before_ready(
     assert StateStore(paths.state).read().default_host == (None if docker_exit else "main")
     assert host.known_hosts_path.read_text() == "offbox-main ssh-ed25519 BBBB\n"
     assert "StrictHostKeyChecking yes" in (paths.config / "ssh_config").read_text()
-    assert (host.known_hosts_path.parent / "ssh_host_ed25519_key").exists() == bool(docker_exit)
+    assert not (host.known_hosts_path.parent / "ssh_host_ed25519_key").exists()
+    assert not (host.known_hosts_path.parent / "ssh_host_ed25519_key.pub").exists()
     # Bootstrap grants Docker group membership after the readiness connection has opened.
     # Retire that connection and verify Docker through a fresh login before declaring ready.
     assert [call.argv for call in runner.calls][-4:] == [
-        ["ssh", "-o", "ConnectTimeout=3", "offbox-main", "--", "test -f /var/lib/offbox/ready"],
+        ["ssh", "-o", "ConnectTimeout=3", "offbox-main", "--", shlex.join(["sh", "-c", READY_PROBE])],
         ["ssh", "-O", "check", "offbox-main"],
         ["ssh", "-O", "exit", "offbox-main"],
         ["ssh", "offbox-main", "--", "docker info --format '{{.ServerVersion}}'"],
@@ -432,6 +442,7 @@ def test_none_driver_removes_only_offbox_resources_in_order() -> None:
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
         ]
     )
     host = HostState(
@@ -454,6 +465,7 @@ def test_none_driver_removes_only_offbox_resources_in_order() -> None:
         "docker volume rm offbox-feature-docker",
         "docker network rm offbox",
         "sudo -n rm -rf /srv/offbox /var/lib/offbox",
+        "sudo -n rm -f /etc/sudoers.d/offbox /home/offbox/.ssh/authorized_keys",
     ]
 
 
@@ -548,10 +560,13 @@ def test_destroy_accepts_full_length_digit_started_env_names(tmp_path: Path) -> 
     env_name = "1" + "a" * 31 + "-abcd"
     env = EnvState(name=env_name, host="main", worktree_path=tmp_path / "repo", created_at=datetime.now(UTC))
     StateStore(paths.state).write(State(hosts={"main": host}, envs={env_name: env}))
-    runner = FakeRunner([Script(prefix=["mutagen", "sync", "list"], stdout="[]"), Script(prefix=["tofu", "destroy"])])
+    runner = FakeRunner(
+        [Script(prefix=["mutagen", "sync", "list"], stdout="[]"), Script(prefix=["tofu", "init"]), Script(prefix=["tofu", "destroy"])]
+    )
     destroy_host(paths, runner, "main", executable=Path("tofu"))
     assert [call.argv for call in runner.calls] == [
         ["mutagen", "sync", "list", "--label-selector", f"offbox-env={env_name}", "--template", "{{ json . }}"],
+        ["tofu", "init", "-input=false"],
         ["tofu", "destroy", "-auto-approve", "-input=false"],
     ]
     assert StateStore(paths.state).read().envs == {}
@@ -611,7 +626,9 @@ def test_host_ssh_separator_preserves_exact_remote_arguments(
     assert calls == [["ssh", "offbox-main", "--", "printf %s 'a; touch /tmp/unwanted'"]]
 
 
-def test_missing_mutagen_does_not_strand_host_cleanup(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_missing_mutagen_does_not_strand_host_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     import subprocess
 
     from offbox.naming import Worktree
@@ -623,11 +640,7 @@ def test_missing_mutagen_does_not_strand_host_cleanup(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("offbox.runner.subprocess.run", missing)
 
-    def unavailable(_name: str) -> str | None:
-        return None
-
-    monkeypatch.setattr("offbox.sync.shutil.which", unavailable)
-    SyncManager(SubprocessRunner()).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))
+    SyncManager(SubprocessRunner(), cache=tmp_path).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))
     assert "Mutagen is not installed" in capsys.readouterr().err
 
 
@@ -641,8 +654,10 @@ def test_mutagen_termination_failure_is_not_hidden() -> None:
         SyncManager(runner).terminate(Worktree(root=Path("/src/project"), name="project-abcd"))
 
 
-@pytest.mark.parametrize("failure", ["check", "exit"])
-def test_destroy_keeps_forward_ownership_and_provider_workspace_when_master_cleanup_fails(tmp_path: Path, failure: str) -> None:
+@pytest.mark.parametrize("failure", ["sync", "check", "exit"])
+def test_cloud_destroy_runs_even_when_local_sync_or_master_cleanup_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: str
+) -> None:
     from datetime import UTC, datetime
     from ipaddress import IPv4Address
 
@@ -675,26 +690,39 @@ def test_destroy_keeps_forward_ownership_and_provider_workspace_when_master_clea
     StateStore(paths.state).write(State(hosts={"main": host}, envs={env.name: env}))
     runner = FakeRunner(
         [
-            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(
+                prefix=["mutagen", "sync", "list"],
+                returncode=1 if failure == "sync" else 0,
+                stdout="[]",
+                stderr="mutagen daemon unavailable",
+            ),
             Script(
                 prefix=["ssh", "-O", "check"],
                 returncode=255 if failure == "check" else 0,
                 stderr="Control socket connect(/tmp/control): Permission denied" if failure == "check" else "Master running (pid=100)",
             ),
-            *(
-                [Script(prefix=["ssh", "-O", "exit"], returncode=255, stderr="Master refused termination request")]
-                if failure == "exit"
-                else []
+            Script(
+                prefix=["ssh", "-O", "exit"],
+                returncode=255 if failure == "exit" else 0,
+                stderr="Master refused termination request" if failure == "exit" else "",
             ),
+            Script(prefix=["tofu", "init"]),
+            Script(prefix=["tofu", "destroy"]),
         ]
     )
-    with pytest.raises(ConnectionError_):
-        destroy_host(paths, runner, "main", executable=Path("tofu"))
+    destroy_host(paths, runner, "main", executable=Path("tofu"))
+    assert [call.argv[:2] for call in runner.calls][-2:] == [["tofu", "init"], ["tofu", "destroy"]]
     state = StateStore(paths.state).read()
-    assert state.hosts[host.name] == host
-    assert state.envs[env.name] == env
-    assert workspace.is_dir()
-    assert not any(call.argv[0] == "tofu" for call in runner.calls)
+    assert state.hosts == {}
+    assert state.envs == {}
+    assert not workspace.exists()
+    err = " ".join(capsys.readouterr().err.split())
+    if failure == "sync":
+        assert "Cannot stop source sync for app-abcd; afterwards run mutagen sync list and terminate offbox-app-abcd" in err
+    else:
+        assert "Cannot close the SSH master for offbox-main; stop that local ssh process manually" in err
+    assert "offbox up" not in err
+    assert "Destroyed host main" in err
 
 
 def test_destroy_releases_global_state_lock_and_preserves_other_hosts_concurrent_update(tmp_path: Path) -> None:
@@ -734,6 +762,7 @@ def test_destroy_releases_global_state_lock_and_preserves_other_hosts_concurrent
             env: Mapping[str, str] | None = None,
             cwd: Path | None = None,
             timeout: float | None = None,
+            interruptible: bool = False,
         ) -> Result:
             with store.lock_path.open("a") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -742,12 +771,15 @@ def test_destroy_releases_global_state_lock_and_preserves_other_hosts_concurrent
                 with store.transaction() as state:
                     state.hosts["other"].address = "192.0.2.3"
                     state.default_host = "other"
-            return super().run(argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout)
+            return super().run(
+                argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+            )
 
     runner = ConcurrentRunner(
         [
             Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=100)"),
             Script(prefix=["ssh", "-O", "exit"], stderr="Exit request sent."),
+            Script(prefix=["tofu", "init"]),
             Script(prefix=["tofu", "destroy"]),
         ]
     )
@@ -759,11 +791,10 @@ def test_destroy_releases_global_state_lock_and_preserves_other_hosts_concurrent
     assert [call.argv for call in runner.calls][:2] == [["ssh", "-O", "check", "offbox-main"], ["ssh", "-O", "exit", "offbox-main"]]
 
 
-def test_existing_host_destroy_keeps_state_when_recreated_master_cannot_close(tmp_path: Path) -> None:
+def _existing_host(tmp_path: Path) -> tuple[Paths, HostState]:
     from datetime import UTC, datetime
 
-    from offbox.host.destroy import destroy_host
-    from offbox.state import HostState, State, StateStore
+    from offbox.state import EnvState, State, StateStore
 
     paths = paths_at(tmp_path)
     workspace = paths.state / "hosts/main/provider"
@@ -778,20 +809,412 @@ def test_existing_host_destroy_keeps_state_when_recreated_master_cannot_close(tm
         provider_dir=workspace,
         known_hosts_path=workspace.parent / "known_hosts",
     )
-    StateStore(paths.state).write(State(hosts={"main": host}, default_host="main"))
+    env = EnvState(name="app-abcd", host="main", worktree_path=tmp_path / "repo", created_at=datetime.now(UTC))
+    StateStore(paths.state).write(State(hosts={"main": host}, envs={env.name: env}, default_host="main"))
+    return paths, host
+
+
+def _cloud_host(tmp_path: Path) -> tuple[Paths, HostState]:
+    from datetime import UTC, datetime
+
+    from offbox.state import State, StateStore
+
+    paths = paths_at(tmp_path)
+    workspace = paths.state / "hosts/main/tofu"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="custom"\ndescription="test"\ndriver="tofu"\n')
+    host = HostState(
+        name="main",
+        provider="custom",
+        address="",
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+        phase="creating",
+    )
+    StateStore(paths.state).write(State(hosts={"main": host}))
+    return paths, host
+
+
+def test_existing_host_destroy_removes_record_after_remote_cleanup_when_master_cannot_close(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from offbox.host.destroy import destroy_host
+    from offbox.state import StateStore
+
+    paths, _host = _existing_host(tmp_path)
     runner = FakeRunner(
         [
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
             Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
             Script(prefix=["ssh", "offbox-main"]),
             Script(prefix=["ssh", "offbox-main"]),
             Script(prefix=["ssh", "offbox-main"], returncode=1, stderr="network offbox not found"),
             Script(prefix=["ssh", "offbox-main"]),
+            Script(prefix=["ssh", "offbox-main"]),
             Script(prefix=["ssh", "-O", "check"], stderr="Master running (pid=200)"),
             Script(prefix=["ssh", "-O", "exit"], returncode=255, stderr="Master refused termination request"),
         ]
     )
-    with pytest.raises(ConnectionError_, match="Cannot close SSH master"):
-        destroy_host(paths, runner, "main")
-    assert StateStore(paths.state).read().hosts[host.name] == host
-    assert workspace.is_dir()
+    destroy_host(paths, runner, "main")
+    assert StateStore(paths.state).read().hosts == {}
+    assert not (paths.state / "hosts/main").exists()
     assert runner.scripts == []
+    assert "Cannot close the SSH master for offbox-main" in " ".join(capsys.readouterr().err.split())
+
+
+def test_existing_host_destroy_stays_strict_before_remote_cleanup(tmp_path: Path) -> None:
+    from offbox.host.destroy import destroy_host
+    from offbox.state import StateStore
+
+    paths, host = _existing_host(tmp_path)
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "list"], returncode=1, stderr="mutagen daemon unavailable")])
+    with pytest.raises(OffboxError, match="mutagen daemon unavailable"):
+        destroy_host(paths, runner, "main")
+    assert StateStore(paths.state).read().hosts["main"] == host
+    assert not any(call.argv[0] == "ssh" for call in runner.calls)
+
+
+def test_forget_removes_only_local_records_for_existing_hosts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from offbox.host.destroy import destroy_host
+    from offbox.state import StateStore
+
+    paths, _host = _existing_host(tmp_path)
+    runner = FakeRunner(
+        [
+            Script(prefix=["mutagen", "sync", "list"], returncode=1, stderr="mutagen daemon unavailable"),
+            Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): Connection refused"),
+        ]
+    )
+    destroy_host(paths, runner, "main", forget=True)
+    state = StateStore(paths.state).read()
+    assert (state.hosts, state.envs, state.default_host) == ({}, {}, None)
+    assert not (paths.state / "hosts/main").exists()
+    assert [call.argv[:3] for call in runner.calls] == [["mutagen", "sync", "list"], ["ssh", "-O", "check"]]
+    err = " ".join(capsys.readouterr().err.split())
+    assert "Forgot host main without contacting 192.0.2.1" in err
+    assert "/etc/sudoers.d/offbox" in err
+    assert "/home/offbox/.ssh/authorized_keys" in err
+
+
+def test_forget_is_rejected_for_cloud_hosts(tmp_path: Path) -> None:
+    from offbox.errors import UsageError
+    from offbox.host.destroy import destroy_host
+    from offbox.state import StateStore
+
+    paths, host = _cloud_host(tmp_path)
+    runner = FakeRunner()
+    with pytest.raises(UsageError, match="cloud host") as caught:
+        destroy_host(paths, runner, "main", executable=Path("tofu"), forget=True)
+    assert caught.value.fix == "Run offbox host destroy main --yes to delete it."
+    assert StateStore(paths.state).read().hosts["main"] == host
+    assert runner.calls == []
+
+
+def test_cli_forget_passes_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+
+    paths, _host = _existing_host(tmp_path)
+    seen: list[tuple[str | None, bool]] = []
+
+    def destroy(_paths: Paths, _runner: Runner, name: str | None = None, *, forget: bool = False) -> None:
+        seen.append((name, forget))
+
+    monkeypatch.setattr("offbox.cli.host.Paths.discover", lambda: paths)
+    monkeypatch.setattr("offbox.cli.host.destroy_host", destroy)
+    result = CliRunner().invoke(app, ["host", "destroy", "main", "--forget", "--yes"])
+    assert result.exit_code == 0
+    assert seen == [("main", True)]
+    assert "Forgetting main" in result.stderr
+
+
+def test_destroy_removes_record_when_state_changes_after_cloud_destroy(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from collections.abc import Mapping, Sequence
+    from datetime import UTC, datetime
+
+    from offbox.host.destroy import destroy_host
+    from offbox.runner import Result
+    from offbox.state import EnvState, StateStore
+
+    paths, _host = _cloud_host(tmp_path)
+    store = StateStore(paths.state)
+
+    class AddsEnvDuringDestroy(FakeRunner):
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            check: bool = True,
+            capture: bool = True,
+            input: str | None = None,
+            env: Mapping[str, str] | None = None,
+            cwd: Path | None = None,
+            timeout: float | None = None,
+            interruptible: bool = False,
+        ) -> Result:
+            if list(argv[:2]) == ["tofu", "destroy"]:
+                with store.transaction() as state:
+                    state.envs["late-abcd"] = EnvState(
+                        name="late-abcd", host="main", worktree_path=tmp_path / "late", created_at=datetime.now(UTC)
+                    )
+            return super().run(
+                argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+            )
+
+    runner = AddsEnvDuringDestroy([Script(prefix=["tofu", "init"]), Script(prefix=["tofu", "destroy"])])
+    destroy_host(paths, runner, "main", executable=Path("tofu"))
+    state = store.read()
+    assert (state.hosts, state.envs) == ({}, {})
+    assert not (paths.state / "hosts/main").exists()
+    assert "changed while it was being destroyed" in " ".join(capsys.readouterr().err.split())
+
+
+@pytest.mark.parametrize("killed", [False, True])
+def test_interrupted_cloud_destroy_keeps_record_and_names_the_label(tmp_path: Path, killed: bool) -> None:
+    from collections.abc import Mapping, Sequence
+
+    from offbox.errors import ProviderInterrupted
+    from offbox.host.destroy import destroy_host
+    from offbox.runner import Result
+    from offbox.state import StateStore
+
+    paths, host = _cloud_host(tmp_path)
+
+    class InterruptedDestroy(FakeRunner):
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            check: bool = True,
+            capture: bool = True,
+            input: str | None = None,
+            env: Mapping[str, str] | None = None,
+            cwd: Path | None = None,
+            timeout: float | None = None,
+            interruptible: bool = False,
+        ) -> Result:
+            if list(argv[:2]) == ["tofu", "destroy"]:
+                raise ProviderInterrupted("Provider operation interrupted", "generic", killed=killed)
+            return super().run(
+                argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+            )
+
+    with pytest.raises(ProviderInterrupted) as caught:
+        destroy_host(paths, InterruptedDestroy([Script(prefix=["tofu", "init"])]), "main", executable=Path("tofu"))
+    assert caught.value.exit_code == 130
+    assert "offbox host destroy main" in (caught.value.fix or "")
+    assert ("offbox-host=main" in (caught.value.fix or "")) is killed
+    assert StateStore(paths.state).read().hosts["main"] == host
+
+
+def _custom_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Paths, Path]:
+    paths = paths_at(tmp_path)
+    provider = paths.config / "providers/custom"
+    provider.mkdir(parents=True)
+    (provider / "provider.toml").write_text(
+        'name="custom"\ndescription="custom"\ndriver="tofu"\n[defaults]\nsize="small"\nregion="test"\nimage="ubuntu"\n'
+    )
+    (provider / "main.tf").write_text("original provider")
+    key = tmp_path / "identity"
+    key.write_text("client private key")
+    key.with_name("identity.pub").write_text("ssh-ed25519 AAAA client")
+
+    def generated_key(_runner: Runner, path: Path) -> tuple[str, str]:
+        path.write_text("host private key")
+        path.with_name(path.name + ".pub").write_text("ssh-ed25519 BBBB host")
+        return "host private key", "ssh-ed25519 BBBB host"
+
+    monkeypatch.setattr("offbox.host.create.generate_host_key", generated_key)
+    return paths, key
+
+
+def test_interrupt_after_apply_reports_destroy_hint_and_exit_130(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.host.create import CreateOptions, create_host
+    from offbox.state import StateStore
+
+    paths, key = _custom_provider(tmp_path, monkeypatch)
+
+    def interrupted(*_args: object, **_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("offbox.host.create.wait_ready", interrupted)
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA"),
+            Script(prefix=["tofu", "init"]),
+            Script(prefix=["tofu", "apply"]),
+            Script(prefix=["tofu", "output"], stdout='{"ip":{"value":"192.0.2.1"},"ssh_user":{"value":"offbox"}}'),
+        ]
+    )
+    with pytest.raises(OffboxError) as caught:
+        create_host(
+            paths,
+            runner,
+            CreateOptions(name="main", provider="custom", ssh_key=key),
+            executable=Path("tofu"),
+            ssh_config=tmp_path / "ssh/config",
+        )
+    assert caught.value.exit_code == 130
+    assert caught.value.message == "Creating host main was interrupted"
+    assert caught.value.fix == "Run offbox host destroy main to clean up; its provider workspace was retained."
+    host = StateStore(paths.state).read().hosts["main"]
+    assert (host.phase, host.address) == ("initializing", "192.0.2.1")
+    assert not (paths.state / "hosts/main/ssh_host_ed25519_key").exists()
+    assert not (paths.state / "hosts/main/ssh_host_ed25519_key.pub").exists()
+    assert "host private key" in (paths.state / "hosts/main/tofu/offbox.auto.tfvars.json").read_text()
+
+
+@pytest.mark.parametrize("killed", [False, True])
+def test_interrupted_apply_names_destroy_and_label_when_force_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, killed: bool
+) -> None:
+    from collections.abc import Mapping, Sequence
+
+    from offbox.errors import ProviderInterrupted
+    from offbox.host.create import CreateOptions, create_host
+    from offbox.runner import Result
+    from offbox.state import StateStore
+
+    paths, key = _custom_provider(tmp_path, monkeypatch)
+
+    class InterruptedApply(FakeRunner):
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            check: bool = True,
+            capture: bool = True,
+            input: str | None = None,
+            env: Mapping[str, str] | None = None,
+            cwd: Path | None = None,
+            timeout: float | None = None,
+            interruptible: bool = False,
+        ) -> Result:
+            if list(argv[:2]) == ["tofu", "apply"]:
+                raise ProviderInterrupted("Provider operation interrupted", "generic", killed=killed)
+            return super().run(
+                argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+            )
+
+    runner = InterruptedApply([Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA"), Script(prefix=["tofu", "init"])])
+    with pytest.raises(OffboxError) as caught:
+        create_host(
+            paths,
+            runner,
+            CreateOptions(name="main", provider="custom", ssh_key=key),
+            executable=Path("tofu"),
+            ssh_config=tmp_path / "ssh/config",
+        )
+    assert caught.value.exit_code == 130
+    if killed:
+        assert caught.value.fix == (
+            "Run offbox host destroy main, then check the provider console for resources labelled offbox-host=main "
+            "and delete any that remain."
+        )
+    else:
+        assert caught.value.fix == "Run offbox host destroy main to clean up; its provider workspace was retained."
+    assert StateStore(paths.state).read().hosts["main"].phase == "creating"
+    assert not (paths.state / "hosts/main/ssh_host_ed25519_key").exists()
+
+
+def test_provider_copy_failure_removes_the_unrecorded_host_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.host.create import CreateOptions, create_host
+    from offbox.providers import Provider
+    from offbox.state import StateStore
+
+    paths, key = _custom_provider(tmp_path, monkeypatch)
+
+    def failing_copy(_provider: Provider, workspace: Path) -> str:
+        workspace.mkdir()
+        (workspace / "partial.tf").write_text("partial")
+        raise PreconditionError("Cannot copy provider", "Check directory permissions and free disk space.")
+
+    monkeypatch.setattr("offbox.host.create.copy_provider", failing_copy)
+    runner = FakeRunner([Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA")])
+    with pytest.raises(PreconditionError, match="Cannot copy provider"):
+        create_host(paths, runner, CreateOptions(name="main", provider="custom", ssh_key=key), executable=Path("tofu"))
+    assert not (paths.state / "hosts/main").exists()
+    assert StateStore(paths.state).read().hosts == {}
+
+
+def bootstrap_runner(tmp_path: Path) -> tuple[FakeRunner, Path]:
+    key = tmp_path / "identity"
+    key.write_text("client private")
+    key.with_name("identity.pub").write_text("ssh-ed25519 AAAA client")
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh-keyscan"], stdout="192.0.2.1 ssh-ed25519 AAAA\n"),
+            Script(prefix=["ssh-add"], returncode=1),
+            Script(prefix=["ssh-keygen", "-y"], stdout="ssh-ed25519 AAAA"),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    return runner, key
+
+
+def scanned_fingerprint() -> str:
+    import base64
+    import hashlib
+
+    return "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode("AAAA")).digest()).decode().rstrip("=")
+
+
+def test_pinned_fingerprint_allows_noninteractive_init_with_hardened_bootstrap(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from offbox.host.init import InitOptions, init_host
+
+    root = tmp_path / "home dir"
+    root.mkdir()
+    runner, key = bootstrap_runner(root)
+    host = init_host(
+        paths_at(root),
+        runner,
+        InitOptions(target="dev@192.0.2.1", ssh_key=key, host_key_fingerprint=scanned_fingerprint()),
+        ssh_config=root / "ssh/config",
+        clock=FakeClock(),
+        probe=lambda _a, _p, _t: True,
+    )
+    assert host.phase == "ready"
+    bootstrap = runner.calls[-2].argv
+    assert f'UserKnownHostsFile="{root}/state/hosts/main/known_hosts"' in bootstrap
+    for option in ("IdentitiesOnly=yes", "ForwardAgent=no", "ForwardX11=no"):
+        assert bootstrap[bootstrap.index(option) - 1] == "-o"
+    assert "without verification" not in capsys.readouterr().err
+
+
+def test_fingerprint_mismatch_stops_before_registration(tmp_path: Path) -> None:
+    from offbox.host.init import InitOptions, init_host
+
+    runner, key = bootstrap_runner(tmp_path)
+    expected = "SHA256:" + "A" * 43
+    with pytest.raises(PreconditionError, match="fingerprint mismatch") as caught:
+        init_host(paths_at(tmp_path), runner, InitOptions(target="dev@192.0.2.1", ssh_key=key, host_key_fingerprint=expected))
+    assert expected in caught.value.message and scanned_fingerprint() in caught.value.message
+    assert [call.argv[0] for call in runner.calls] == ["ssh-keyscan"]
+    assert not (tmp_path / "state/hosts").exists()
+
+
+def test_blind_host_key_acceptance_recommends_fingerprint(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from offbox.host.init import InitOptions, init_host
+
+    runner, key = bootstrap_runner(tmp_path)
+    init_host(
+        paths_at(tmp_path),
+        runner,
+        InitOptions(target="dev@192.0.2.1", ssh_key=key, accept_host_key=True),
+        ssh_config=tmp_path / "ssh/config",
+        clock=FakeClock(),
+        probe=lambda _a, _p, _t: True,
+    )
+    assert f"prefer --host-key-fingerprint {scanned_fingerprint()}" in capsys.readouterr().err
+
+
+def test_malformed_fingerprint_is_a_usage_error() -> None:
+    from offbox.errors import UsageError
+    from offbox.host.init import InitOptions
+
+    with pytest.raises(UsageError, match="Invalid host key fingerprint"):
+        InitOptions(target="dev@192.0.2.1", host_key_fingerprint="MD5:aa:bb")

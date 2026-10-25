@@ -37,3 +37,9 @@ class CommandFailed(OffboxError):
 
 class ProviderError(OffboxError):
     pass
+
+
+class ProviderInterrupted(OffboxError):
+    def __init__(self, message: str, fix: str, *, killed: bool) -> None:
+        super().__init__(message, fix, 130)
+        self.killed = killed

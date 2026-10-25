@@ -19,14 +19,17 @@ class ExecCommand(TyperCommand):
             args = args[:index]
         return super().parse_args(ctx, args)
 
+    def collect_usage_pieces(self, ctx: Context) -> list[str]:
+        return [*super().collect_usage_pieces(ctx), "-- COMMAND [ARGS]..."]
+
 
 def execute(
     ctx: typer.Context,
-    no_sync: Annotated[bool, typer.Option("--no-sync")] = False,
-    tty: Annotated[bool, typer.Option("--tty")] = False,
-    no_tty: Annotated[bool, typer.Option("--no-tty")] = False,
-    stdin: Annotated[bool, typer.Option("--stdin")] = False,
-    env: Annotated[list[str] | None, typer.Option("--env")] = None,
+    no_sync: Annotated[bool, typer.Option("--no-sync", help="Skip the source sync flush before running.")] = False,
+    tty: Annotated[bool, typer.Option("--tty", help="Allocate a remote TTY. Default: when stdin and stdout are terminals.")] = False,
+    no_tty: Annotated[bool, typer.Option("--no-tty", help="Never allocate a remote TTY.")] = False,
+    stdin: Annotated[bool, typer.Option("--stdin", help="Forward local stdin to a non-TTY command.")] = False,
+    env: Annotated[list[str] | None, typer.Option("--env", help="Set NAME=value in the command environment; repeatable.")] = None,
 ) -> None:
     """Run a command after -- inside this worktree's environment."""
     if tty and no_tty:

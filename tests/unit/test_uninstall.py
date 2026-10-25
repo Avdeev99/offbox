@@ -3,14 +3,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 from pydantic import TypeAdapter
 
 from offbox.errors import CommandFailed, ConnectionError_, PreconditionError
 from offbox.logging import configure
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.ssh import include_line, remove_include
 from offbox.state import HostState, State, StateStore
+from offbox.tools import mutagen_directory
 from offbox.uninstall import uninstall
 
 
@@ -193,13 +194,16 @@ def test_uninstall_keeps_resources_when_state_changes_during_network_cleanup(tmp
             env: Mapping[str, str] | None = None,
             cwd: Path | None = None,
             timeout: float | None = None,
+            interruptible: bool = False,
         ) -> Result:
             with store.lock_path.open("a") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
             with store.transaction() as state:
                 state.default_host = "concurrent-change"
-            return super().run(argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout)
+            return super().run(
+                argv, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+            )
 
     runner = ConcurrentRunner([Script(prefix=["mutagen", "sync", "list"], stdout="[]")])
     with pytest.raises(PreconditionError, match="Local state changed"):
@@ -298,3 +302,119 @@ def test_ssh_include_write_failure_after_directory_cleanup_can_be_retried(tmp_pa
     assert include_line(paths).encode() not in ssh_config.read_bytes()
     assert not (paths.config / "ssh_config").exists()
     assert runner.scripts == []
+
+
+def _add_cloud_host(paths: Paths, *, address: str = "198.51.100.7") -> HostState:
+    workspace = paths.state / "hosts/cloud/tofu"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="hetzner"\ndescription="cloud"\ndriver="tofu"\n')
+    host = HostState(
+        name="cloud",
+        provider="hetzner",
+        address=address,
+        ssh_user="offbox",
+        created_at=datetime.now(UTC),
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+    )
+    with StateStore(paths.state).transaction() as state:
+        state.hosts[host.name] = host
+    return host
+
+
+def test_uninstall_yes_refuses_while_cloud_hosts_remain(tmp_path: Path) -> None:
+    paths, ssh_config = context(tmp_path)
+    host = _add_cloud_host(paths)
+    runner = FakeRunner()
+    with pytest.raises(PreconditionError) as caught:
+        uninstall(paths, runner, yes=True, ssh_config=ssh_config)
+    assert caught.value.message == (
+        "Cloud hosts remain and keep billing after uninstall: cloud (hetzner, 198.51.100.7, label offbox-host=cloud)"
+    )
+    assert caught.value.fix == (
+        "Run offbox host destroy cloud --yes first, or add --abandon-cloud-hosts to keep them running without local records."
+    )
+    assert StateStore(paths.state).read().hosts["cloud"] == host
+    assert paths.cache.is_dir()
+    assert runner.calls == []
+
+
+def test_uninstall_without_yes_points_cloud_users_to_the_abandon_flag(tmp_path: Path) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    _add_cloud_host(paths, address="")
+    with pytest.raises(PreconditionError) as caught:
+        uninstall(paths, FakeRunner(), ssh_config=ssh_config)
+    assert caught.value.fix == "Run offbox host destroy cloud first, or offbox uninstall --yes --abandon-cloud-hosts to retain the hosts."
+
+
+def test_uninstall_abandons_cloud_hosts_only_with_explicit_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    _add_cloud_host(paths)
+    runner = FakeRunner(
+        [
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file or directory"),
+        ]
+    )
+    uninstall(paths, runner, yes=True, abandon_cloud_hosts=True, ssh_config=ssh_config)
+    assert not paths.state.exists()
+    err = " ".join(capsys.readouterr().err.split())
+    assert "Abandoning cloud host cloud (hetzner, 198.51.100.7, label offbox-host=cloud)" in err
+
+
+def test_uninstall_cli_passes_the_abandon_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from offbox.cli import app
+    from offbox.runner import Runner
+
+    paths, _ssh_config = context(tmp_path, host=False)
+    seen: list[tuple[bool, bool]] = []
+
+    def run_uninstall(_paths: Paths, _runner: Runner, *, yes: bool = False, abandon_cloud_hosts: bool = False) -> None:
+        seen.append((yes, abandon_cloud_hosts))
+
+    monkeypatch.setattr("offbox.cli.misc.Paths.discover", lambda: paths)
+    monkeypatch.setattr("offbox.cli.misc.run_uninstall", run_uninstall)
+    result = CliRunner().invoke(app, ["uninstall", "--yes", "--abandon-cloud-hosts"])
+    assert result.exit_code == 0
+    assert seen == [(True, True)]
+
+
+def test_uninstall_stops_the_downloaded_mutagen_daemon_before_removing_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    directory = mutagen_directory(paths.cache)
+    directory.mkdir(parents=True)
+    (directory / "mutagen").write_text("binary")
+    (directory / "mutagen-agents.tar.gz").write_text("agents")
+
+    def missing(_name: str) -> str | None:
+        return None
+
+    monkeypatch.setattr("offbox.uninstall.shutil.which", missing)
+    runner = FakeRunner(
+        [
+            Script(prefix=["mutagen", "sync", "list"], stdout="[]"),
+            Script(prefix=[str(directory / "mutagen"), "sync", "list"], stdout="[]"),
+            Script(prefix=[str(directory / "mutagen"), "daemon", "stop"]),
+        ]
+    )
+    uninstall(paths, runner, yes=True, ssh_config=ssh_config)
+    assert [str(directory / "mutagen"), "daemon", "stop"] in [call.argv for call in runner.calls]
+    assert not paths.cache.exists()
+
+
+def test_uninstall_leaves_a_path_mutagen_daemon_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths, ssh_config = context(tmp_path, host=False)
+    directory = mutagen_directory(paths.cache)
+    directory.mkdir(parents=True)
+    (directory / "mutagen").write_text("binary")
+    (directory / "mutagen-agents.tar.gz").write_text("agents")
+
+    def installed(_name: str) -> str | None:
+        return "/usr/local/bin/mutagen"
+
+    monkeypatch.setattr("offbox.uninstall.shutil.which", installed)
+    runner = FakeRunner([Script(prefix=["mutagen", "sync", "list"], stdout="[]")])
+    uninstall(paths, runner, yes=True, ssh_config=ssh_config)
+    assert all(call.argv[1:3] != ["daemon", "stop"] for call in runner.calls)

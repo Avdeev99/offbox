@@ -3,10 +3,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 
 from offbox.drivers.none import NoneDriver
-from offbox.errors import ProviderError
-from offbox.runner import FakeRunner, Script
+from offbox.errors import CommandFailed, ProviderError
 from offbox.state import HostState
 
 
@@ -29,13 +29,17 @@ def test_destroy_preserves_unlabelled_or_foreign_network(labels: dict[str, str] 
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"], stdout=json.dumps([{"Name": "offbox", "Labels": labels}])),
             Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
         ]
     )
     NoneDriver(runner, host()).destroy()
     commands = [call.argv[-1] for call in runner.calls]
     assert "docker volume ls -q --filter label=offbox.env" in commands
     assert "docker network rm offbox" not in commands
-    assert commands[-1] == "sudo -n rm -rf /srv/offbox /var/lib/offbox"
+    assert commands[-2:] == [
+        "sudo -n rm -rf /srv/offbox /var/lib/offbox",
+        "sudo -n rm -f /etc/sudoers.d/offbox /home/offbox/.ssh/authorized_keys",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -70,10 +74,28 @@ def test_missing_network_does_not_prevent_directory_cleanup() -> None:
             Script(prefix=["ssh"]),
             Script(prefix=["ssh"], returncode=1, stderr="network offbox not found"),
             Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
         ]
     )
     NoneDriver(runner, host()).destroy()
-    assert runner.calls[-1].argv[-1] == "sudo -n rm -rf /srv/offbox /var/lib/offbox"
+    assert [call.argv[-1] for call in runner.calls[-2:]] == [
+        "sudo -n rm -rf /srv/offbox /var/lib/offbox",
+        "sudo -n rm -f /etc/sudoers.d/offbox /home/offbox/.ssh/authorized_keys",
+    ]
+
+
+def test_access_is_revoked_only_after_owned_directories_are_removed() -> None:
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"]),
+            Script(prefix=["ssh"], returncode=1, stderr="network offbox not found"),
+            Script(prefix=["ssh"], returncode=1, stderr="rm: cannot remove '/srv/offbox': Device or resource busy"),
+        ]
+    )
+    with pytest.raises(CommandFailed, match="Device or resource busy"):
+        NoneDriver(runner, host()).destroy()
+    assert all("sudoers" not in call.argv[-1] for call in runner.calls)
 
 
 def test_foreign_network_endpoint_aborts_before_any_deletion() -> None:

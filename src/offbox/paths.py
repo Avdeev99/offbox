@@ -1,4 +1,5 @@
 import os
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -39,6 +40,12 @@ class Paths:
 
     def log_file(self, day: date | None = None) -> Path:
         return self.logs / f"{day or date.today()}.log"
+
+    def secure_roots(self) -> None:
+        for root in (self.state, self.cache):
+            root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if stat.S_IMODE(root.stat().st_mode) != 0o700:
+                root.chmod(0o700)
 
     def ensure_control(self) -> Path:
         self.control.mkdir(mode=0o700, parents=True, exist_ok=True)

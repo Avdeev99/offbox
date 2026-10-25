@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import math
 import re
@@ -99,6 +100,25 @@ def worktree_exists(root: Path) -> bool:
         return False
     except OSError as exc:
         raise PreconditionError(f"Cannot inspect worktree {root}", "Restore access to the worktree before running GC.") from exc
+
+
+STOP_LOCK_WAIT_SECONDS = 10
+READY_POLL_SECONDS = 0.2
+SETTINGS_LABEL = "offbox.settings"
+_HOST_RESOURCES = r"""test -f /var/lib/offbox/ready || { printf '%s\n' 'offbox: host initialisation is incomplete' >&2; exit 3; }
+exec docker info --format '{"cpus":{{.NCPU}},"memory":{{.MemTotal}}}'
+"""
+
+
+def settings_digest(command: Sequence[str]) -> str:
+    """Hash the container-shaping docker run settings; offbox upgrades and labels do not count as drift."""
+    values = {flag: command[command.index(flag) + 1] for flag in ("--cpus", "--memory", "--shm-size")}
+    values["image"] = command[-1]
+    return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()[:32]
+
+
+def with_settings_label(command: Sequence[str]) -> list[str]:
+    return [*command[:-1], "--label", f"{SETTINGS_LABEL}={settings_digest(command)}", command[-1]]
 
 
 def _labels(work: Worktree) -> list[str]:
@@ -260,7 +280,7 @@ class Runtime:
         self.runner = runner
         self.clock = clock or SystemClock()
         self.store = StateStore(paths.state)
-        self.sync = SyncManager(runner)
+        self.sync = SyncManager(runner, cache=paths.cache)
         self.ports = PortManager(paths, runner, clock=self.clock)
 
     def remote(self, host: HostState, argv: Sequence[str], *, check: bool = True, timeout: float = 30, input: str | None = None) -> Result:
@@ -341,12 +361,13 @@ class Runtime:
         )
 
     def up(self, *, cwd: Path | None = None, host_name: str | None = None, fresh: bool = False, no_stack: bool = False) -> EnvState:
-        from offbox.execute import Executor, execution_env, install_paths
+        from offbox.execute import Executor, check_exec_env, execution_env, install_paths, unapproved_exec_env
 
         work = find_worktree(self.runner, cwd)
         project = load_config(work.root / "offbox.toml", ProjectConfig)
         install_paths(project.install.when)
         execution_env(project.exec.env, {}, tty=False)
+        check_exec_env(self.paths, project.exec.env)
         config = project.env
         dockerfile = self.dockerfile_path(work, config.dockerfile) if config.dockerfile is not None else None
         previous = self._recorded(work)
@@ -354,8 +375,7 @@ class Runtime:
             raise PreconditionError("Environment is registered on another host", "Remove it before selecting a different host.")
         host = self._host(previous.host if previous is not None else host_name)
         with host_operation(self.paths, host.name, wait_timeout=120, clock=self.clock):
-            self.remote(host, ["test", "-f", "/var/lib/offbox/ready"], timeout=5)
-            resource_result = self.remote(host, ["docker", "info", "--format", '{"cpus":{{.NCPU}},"memory":{{.MemTotal}}}'])
+            resource_result = self.remote(host, ["sh", "-c", _HOST_RESOURCES])
             try:
                 resources = HostResources.model_validate_json(resource_result.stdout)
             except ValidationError as exc:
@@ -374,7 +394,10 @@ class Runtime:
                 ):
                     raise PreconditionError("Environment or host changed while preparing up", "Retry offbox up.")
                 env = previous or EnvState(name=work.name, host=host.name, worktree_path=work.root, created_at=datetime.now(UTC))
+                added = [] if env.approved_exec_env is None else unapproved_exec_env(project.exec.env, env.approved_exec_env)
                 state.envs[env.name] = env
+            if added:
+                console.warn("Forwarding new local variables to the environment: " + ", ".join(added))
             self.mutate(host, work, "prepare")
             self.sync.ensure(work, host, project.sync)
             built: BuiltImage | None = None
@@ -385,9 +408,12 @@ class Runtime:
             if fresh:
                 self.sync.pause(work, host)
                 self.ports.cancel(work, host)
+            command = with_settings_label(command)
             result = self.mutate(host, work, "fresh" if fresh else "up", command, pull=dockerfile is None)
             container = self._container(result.stdout)
             self._owned(work, container)
+            recorded_settings = (container.config.labels or {}).get(SETTINGS_LABEL)
+            drifted = recorded_settings is not None and recorded_settings != settings_digest(command)
             self.wait_ready(host, work, container)
             if fresh:
                 self.sync.ensure(work, host, project.sync)
@@ -398,6 +424,8 @@ class Runtime:
                 console.info(f"localhost:{forward.local} → {forward.env}:{forward.remote}")
             if built is not None and built.digest != container.image:
                 console.warn("Custom image changed; run offbox up --fresh to use it. Existing Docker data is retained.")
+            elif drifted:
+                console.warn("Environment settings changed (image, cpus, memory or shm_size); run offbox up --fresh to apply them.")
             env.image_digest = container.image
             with self.store.transaction() as state:
                 if state.envs.get(env.name) is None:
@@ -406,6 +434,7 @@ class Runtime:
                 if current.host != host.name or current.worktree_path != work.root:
                     raise PreconditionError("Environment registration changed", "Run offbox list before retrying.")
                 current.image_digest = env.image_digest
+                current.approved_exec_env = sorted(set(project.exec.env))
                 env = current
         console.success(f"Environment {env.name} ready on {host.name}")
         return env
@@ -544,7 +573,7 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
                 )
                 if result.returncode == 0:
                     return
-                self.clock.sleep(min(1, max(0, deadline - self.clock.now())))
+                self.clock.sleep(min(READY_POLL_SECONDS, max(0, deadline - self.clock.now())))
                 if self.clock.now() < deadline:
                     current = self.inspect(host, work, timeout=min(5, deadline - self.clock.now()))
                     if current is None:
@@ -553,7 +582,7 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
                     container = current
             except OffboxError as exc:
                 if isinstance(exc.__cause__, subprocess.TimeoutExpired):
-                    self.clock.sleep(min(1, max(0, deadline - self.clock.now())))
+                    self.clock.sleep(min(READY_POLL_SECONDS, max(0, deadline - self.clock.now())))
                     continue
                 self.diagnostics(host, work)
                 raise
@@ -577,7 +606,7 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
 
     def stop(self, *, cwd: Path | None = None) -> None:
         work, env, host = self.current(cwd)
-        with host_operation(self.paths, host.name):
+        with host_operation(self.paths, host.name, wait_timeout=STOP_LOCK_WAIT_SECONDS, clock=self.clock):
             self._check_record(work, env, host)
             self.ports.cancel(work, host)
             self.sync.pause(work, host)
@@ -603,7 +632,7 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
 
     def remove(self, *, cwd: Path | None = None) -> None:
         work, env, host = self.current(cwd)
-        with host_operation(self.paths, host.name):
+        with host_operation(self.paths, host.name, wait_timeout=STOP_LOCK_WAIT_SECONDS, clock=self.clock):
             self._check_record(work, env, host)
             self._remove(host, work, registered=True)
         console.success(f"Removed {work.name}")

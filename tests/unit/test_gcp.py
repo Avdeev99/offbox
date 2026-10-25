@@ -18,7 +18,8 @@ def test_gcp_provider_is_discoverable_and_copied_for_recoverable_teardown(tmp_pa
     workspace = tmp_path / "saved-provider"
     assert len(copy_provider(provider, workspace)) == 64
     assert (workspace / "main.tf").is_file()
-    assert (workspace / "tests/provider.tftest.hcl").is_file()
+    assert (workspace / ".terraform.lock.hcl").is_file()
+    assert not (workspace / "tests").exists()
     assert credentials_env(provider.manifest, paths, {"GOOGLE_PROJECT": "synthetic-project"}) == {"GOOGLE_PROJECT": "synthetic-project"}
     with pytest.raises(PreconditionError, match="GOOGLE_PROJECT") as caught:
         credentials_env(provider.manifest, paths, {})

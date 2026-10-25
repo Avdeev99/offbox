@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable, Generator
 from datetime import date
 from pathlib import Path
@@ -6,29 +7,73 @@ from pydantic import ValidationError
 
 from offbox.errors import CommandFailed, ConnectionError_, PreconditionError, UsageError
 from offbox.host.ready import Clock, SystemClock
-from offbox.logging import LogEntry
+from offbox.logging import LogEntry, current_invocation
 from offbox.paths import Paths
 from offbox.runner import Runner
 from offbox.runtime import Runtime
 from offbox.ssh import ssh_argv
 
+_PENDING_INVOCATIONS = 256
 
-def environment_records(path: Path, env: str) -> list[tuple[int, str]]:
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    except FileNotFoundError:
-        return []
-    except (OSError, UnicodeError) as exc:
-        raise PreconditionError(f"Cannot read log file {path}", "Check log permissions and encoding.") from exc
-    entries: list[tuple[int, str, LogEntry]] = []
-    for index, line in enumerate(lines):
+
+class LogTail:
+    """Incrementally select an environment's log lines, including its invocations' lines written before the worktree was known."""
+
+    def __init__(self, env: str, *, exclude: str = "") -> None:
+        self.env = env
+        self.exclude = exclude
+        self.offset = 0
+        self.partial = b""
+        self.owned: set[str] = set()
+        self.pending: dict[str, list[str]] = {}
+
+    def read(self, path: Path) -> list[str]:
+        try:
+            with path.open("rb") as source:
+                if os.fstat(source.fileno()).st_size < self.offset:
+                    self.offset, self.partial = 0, b""
+                source.seek(self.offset)
+                data = source.read()
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            raise PreconditionError(f"Cannot read log file {path}", "Check log permissions and encoding.") from exc
+        self.offset += len(data)
+        *complete, self.partial = (self.partial + data).split(b"\n")
+        selected: list[str] = []
+        for raw in complete:
+            try:
+                line = raw.decode("utf-8") + "\n"
+            except UnicodeError as exc:
+                raise PreconditionError(f"Cannot read log file {path}", "Check log permissions and encoding.") from exc
+            selected.extend(self._select(line))
+        return selected
+
+    def _select(self, line: str) -> list[str]:
         try:
             entry = LogEntry.model_validate_json(line)
         except ValidationError:
-            continue
-        entries.append((index, line, entry))
-    owned = {entry.invocation for _index, _line, entry in entries if entry.env == env and entry.invocation}
-    return [(index, line) for index, line, entry in entries if entry.env == env or (entry.env is None and entry.invocation in owned)]
+            return []
+        invocation = entry.invocation
+        if self.exclude and invocation == self.exclude:
+            return []
+        if entry.env == self.env:
+            earlier: list[str] = []
+            if invocation and invocation not in self.owned:
+                self.owned.add(invocation)
+                earlier = self.pending.pop(invocation, [])
+            return [*earlier, line]
+        if entry.env is None and invocation:
+            if invocation in self.owned:
+                return [line]
+            self.pending.setdefault(invocation, []).append(line)
+            while len(self.pending) > _PENDING_INVOCATIONS:
+                del self.pending[next(iter(self.pending))]
+        return []
+
+
+def environment_records(path: Path, env: str) -> list[str]:
+    return LogTail(env).read(path)
 
 
 def follow_lines(
@@ -36,15 +81,12 @@ def follow_lines(
 ) -> Generator[str]:
     timer = clock or SystemClock()
     selected: date | None = None
-    emitted: set[int] = set()
+    tail = LogTail(env, exclude=current_invocation())
     while True:
         current = today()
         if current != selected:
-            selected, emitted = current, set()
-        for index, line in environment_records(paths.log_file(current), env):
-            if index not in emitted:
-                emitted.add(index)
-                yield line
+            selected, tail = current, LogTail(env, exclude=current_invocation())
+        yield from tail.read(paths.log_file(current))
         if not follow:
             return
         timer.sleep(0.2)

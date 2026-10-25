@@ -1,5 +1,6 @@
 import fcntl
 import os
+import shlex
 import tempfile
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -38,6 +39,7 @@ class EnvState(Model):
     local_ports: dict[int, int] = Field(default_factory=dict[int, int])
     active_forwards: list[int] = Field(default_factory=list[int])
     image_digest: str | None = None
+    approved_exec_env: list[str] | None = None
 
 
 class State(Model):
@@ -51,20 +53,38 @@ class StateStore:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.path = directory / "state.json"
+        self.backup_path = directory / "state.json.bak"
         self.lock_path = directory / "state.lock"
 
     @contextmanager
     def _lock(self) -> Generator[None]:
         try:
             self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            with self.lock_path.open("a", encoding="utf-8") as lock:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock = self.lock_path.open("a", encoding="utf-8")
         except OSError as exc:
             raise PreconditionError(f"Cannot lock state {self.lock_path}", "Check the state directory permissions.") from exc
+        with lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            except OSError as exc:
+                raise PreconditionError(f"Cannot lock state {self.lock_path}", "Check the state directory permissions.") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    def _recovery_fix(self) -> str:
+        steps = ["Repair the state file"]
+        if self.backup_path.is_file():
+            steps = [f"Restore the previous state with cp {shlex.quote(str(self.backup_path))} {shlex.quote(str(self.path))}, or repair it"]
+        try:
+            workspaces = sorted(path for path in (self.directory / "hosts").glob("*/tofu") if path.is_dir())
+        except OSError:
+            workspaces = []
+        if workspaces:
+            commands = "; ".join(shlex.join(["tofu", f"-chdir={workspace}", "destroy"]) for workspace in workspaces)
+            steps.append(f"to delete cloud hosts without offbox, run {commands}")
+        return "; ".join(steps) + "."
 
     def _read(self) -> State:
         try:
@@ -72,7 +92,24 @@ class StateStore:
         except FileNotFoundError:
             return State()
         except (OSError, UnicodeError, ValidationError) as exc:
-            raise PreconditionError(f"Cannot read state {self.path}", "Repair or restore the state file before continuing.") from exc
+            raise PreconditionError(f"Cannot read state {self.path}", self._recovery_fix()) from exc
+
+    def _backup(self) -> None:
+        try:
+            previous = self.path.read_bytes()
+        except FileNotFoundError:
+            return
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="wb", dir=self.directory, prefix=".state-backup-", delete=False) as target:
+                temporary = Path(target.name)
+                target.write(previous)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, self.backup_path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def _write(self, state: State) -> None:
         validated = State.model_validate_json(state.model_dump_json())
@@ -83,6 +120,7 @@ class StateStore:
                 target.write(validated.model_dump_json(indent=2) + "\n")
                 target.flush()
                 os.fsync(target.fileno())
+            self._backup()
             os.replace(temporary, self.path)
         except OSError as exc:
             raise PreconditionError(f"Cannot write state {self.path}", "Check free space and state directory permissions.") from exc

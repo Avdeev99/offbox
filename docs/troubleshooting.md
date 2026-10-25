@@ -17,6 +17,7 @@ Use `offbox --help` or the command’s `--help` to inspect flags. Destructive op
 - `Fix: Restart offbox.`
 - `Fix: Run offbox gc --dry-run to review, then offbox gc --yes.`
 - `Fix: Run offbox rm --yes to confirm removal.`
+- `Fix: Run offbox up --fresh --yes.`
 - `Fix: Run offbox shell in an interactive terminal.`
 - `Fix: Run the command again when ready.`
 - `Fix: Choose one TTY mode.`
@@ -24,6 +25,7 @@ Use `offbox --help` or the command’s `--help` to inspect flags. Destructive op
 - `Fix: Create or initialise the host before selecting it.`
 - `Fix: Pass a command after -- for noninteractive SSH.`
 - `Fix: Run offbox host destroy <host> --yes.`
+- `Fix: Run offbox host destroy <host> --forget --yes.`
 - `Fix: Run offbox host destroy <host> to clean up the pending host.`
 - `Fix: Run offbox logs --stack SERVICE.`
 - `Fix: Run offbox --help for valid arguments.`
@@ -39,25 +41,31 @@ Correct the named file or key, then retry. Keep provider workspaces and state un
 - `Fix: Correct <path>; keep permissions at 0600.`
 - `Fix: Correct these keys in <path>.`
 - `Fix: Fix the TOML syntax and permissions in <path>.`
-- `Fix: Set HCLOUD_TOKEN or hetzner.token in credentials.toml (mode 0600).`
+- `Fix: Set HCLOUD_TOKEN or hetzner.token in credentials.toml (mode 0600); see https://github.com/Avdeev99/offbox/blob/master/docs/installation.md#hetzner.`
 - `Fix: chmod 600 <path>`
 - `Fix: Check free space and state directory permissions.`
 - `Fix: Check the state directory permissions.`
-- `Fix: Repair or restore the state file before continuing.`
+- `Fix: Repair the state file.`
+- `Fix: Restore the previous state with cp <state>.bak <state>, or repair it; to delete cloud hosts without offbox, run tofu -chdir=<workspace> destroy.` One command is printed for each `hosts/*/tofu` workspace.
 - `Fix: Remove the directory and retry.`
 
 ## Tools and local processes
 
-Check `offbox doctor` first. Mutagen is a separate installation. OpenTofu downloads are verified before execution; install a supported binary on PATH if downloads are unavailable. Inspect an interrupted provisioning operation before retrying creation.
+Check `offbox doctor` first; it names the Mutagen binary in use. `offbox setup` offers a verified Mutagen 0.18.1 download when none is on PATH, and OpenTofu downloads are verified before execution; install a supported binary on PATH if downloads are unavailable. After switching Mutagen versions, run `mutagen daemon stop`. Inspect an interrupted provisioning operation before retrying creation.
 
-- `Fix: Check your network or install OpenTofu >=1.8 on PATH.`
+- `Fix: Check your network and retry, or install the tool on PATH.`
+- `Fix: Retry, or install the tool on PATH.`
 - `Fix: Clear <directory> and retry, or install OpenTofu on PATH.`
 - `Fix: Install <name>.`
-- `Fix: Install Mutagen 0.18.x: brew install mutagen-io/mutagen/mutagen (macOS), or https://github.com/mutagen-io/mutagen/releases.`
-- `Fix: Install OpenSSH >=8.0.`
+- `Fix: Run offbox setup to download Mutagen, or install Mutagen 0.18.x.`
+- `Fix: Install Mutagen 0.18.x, or run mutagen daemon stop, remove <path> from PATH and run offbox setup.`
+- `Fix: Retry offbox setup, or install Mutagen 0.18.x on PATH.`
+- `Fix: Clear <directory> and retry, or install Mutagen 0.18.x on PATH.`
+- `Fix: Install Mutagen 0.18.x on PATH.`
+- `Fix: OpenSSH >=8.0 is required. <install command>` The install command depends on the system: `xcode-select --install`, `brew install openssh`, `sudo apt install git openssh-client` or `sudo dnf install git openssh-clients`.
 - `Fix: Install OpenTofu >=1.8 on PATH.`
 - `Fix: Install OpenTofu >=1.8 or Terraform >=1.6.`
-- `Fix: Install git >=2.30.`
+- `Fix: git >=2.30 is required. <install command>`
 - `Fix: Remove <archive> and retry, or install OpenTofu on PATH.`
 - `Fix: Check connectivity and try again.`
 - `Fix: Check subprocess pipe support and retry.`
@@ -65,19 +73,22 @@ Check `offbox doctor` first. Mutagen is a separate installation. OpenTofu downlo
 - `Fix: Inspect and stop the local SSH process manually.`
 - `Fix: Install <tool> and check its permissions.`
 - `Fix: Run offbox host list and destroy the interrupted host.`
-- `Fix: Script this command in FakeRunner.`
+- `Fix: Check the provider console for resources labelled offbox-host and delete them, then run offbox host destroy NAME.`
 - `Fix: Stop the local SSH process and inspect the remote command.`
 - `Fix: Supply a command to run.`
-- `Fix: Use a bounded wait, kill it, or script a completion status.`
 - `Fix: Check connectivity with offbox host ssh <selected>.`
 - `Fix: Correct the reported problem and retry offbox doctor.`
+- `Fix: Run offbox setup.` No default host is configured yet.
 - `Fix: Create the host or choose a registered host.`
 - `Fix: Generate <key> or load it with ssh-add <key>.`
+- `Fix: Run ssh-keygen -t ed25519 -N "" -C offbox -f ~/.ssh/offbox_ed25519, then rerun offbox setup.`
+- `Fix: Run ssh-keygen -t ed25519 -N "" -C offbox -f ~/.ssh/offbox_ed25519, or pass --ssh-key PATH.`
+- `Fix: Create <directory> with mode 0700 and retry.`
 - `Fix: Check the command output and try again.`
 
 ## Hosts and providers
 
-Keep a failed host’s copied provider workspace so `host destroy` can clean up its billable resources. A stopped cloud server can still bill. Verify a changed host fingerprint independently before accepting it; replacing a pinned key without verifying identity defeats SSH host checking. Public-key regeneration commands write the `.pub` sidecar, not a replacement private key.
+Keep a failed host’s copied provider workspace so `host destroy` can clean up its billable resources. A stopped cloud server can still bill. Cloud destroy continues when local sync or SSH master cleanup fails and prints what to stop manually. After Ctrl-C, Offbox waits for OpenTofu to save state; only a third Ctrl-C force-stops it, after which resources labelled `offbox-host=<host>` may exist without being tracked. `host destroy --forget` is only for unreachable SSH hosts. Verify a changed host fingerprint independently before accepting it; replacing a pinned key without verifying identity defeats SSH host checking. Public-key regeneration commands write the `.pub` sidecar, not a replacement private key.
 
 - `Fix: Check state directory permissions.`
 - `Fix: Correct the SSH public key file permissions and encoding.`
@@ -86,12 +97,13 @@ Keep a failed host’s copied provider workspace so `host destroy` can clean up 
 - `Fix: Generate the key or load it with ssh-add <key>.`
 - `Fix: Regenerate <path> and load the matching key with ssh-add <key>.`
 - `Fix: Regenerate <sidecar> with ssh-keygen -y -f <key>.`
-- `Fix: Run offbox host create or offbox host use NAME.`
+- `Fix: Run offbox setup, or offbox host use NAME.`
 - `Fix: Run offbox host list or create this host.`
 - `Fix: Wait for that operation to finish, then retry.`
 - `Fix: Check state directory permissions and ssh-keygen.`
 - `Fix: Inspect the existing directory before removing it or choose another host name.`
 - `Fix: Run offbox host destroy <host> to clean up; its provider workspace was retained.`
+- `Fix: Run offbox host destroy <host>, then check the provider console for resources labelled offbox-host=<host> and delete any that remain.`
 - `Fix: Run offbox host destroy <host> or choose another name.`
 - `Fix: Run offbox host init USER@ADDRESS.`
 - `Fix: Set provider defaults or a matching host preset.`
@@ -100,11 +112,16 @@ Keep a failed host’s copied provider workspace so `host destroy` can clean up 
 - `Fix: Correct the reported problem and rerun the same host init command; its registration was retained.`
 - `Fix: Correct the ssh provider manifest.`
 - `Fix: Inspect the existing directory or choose another name.`
-- `Fix: Review the host fingerprint and pass --accept-host-key.`
+- `Fix: Pass --host-key-fingerprint SHA256:... from ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server.`
+- `Fix: Verify the server identity with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server before retrying.` The scanned key does not match `--host-key-fingerprint`; do not retry with `--accept-host-key` until you know why.
+- `Fix: Pass the SHA256:... value printed by ssh-keygen -lf on the server.`
 - `Fix: Verify the fingerprint and rerun offbox host init.`
 - `Fix: Verify the server identity before changing its stored host key.`
 - `Fix: Install OpenTofu or Terraform and retry.`
 - `Fix: Remove the obsolete local host directory manually.`
+- `Fix: Run offbox host destroy <host> again.`
+- `Fix: Run offbox host destroy <host> again, then check the provider console for resources labelled offbox-host=<host> and delete any that remain.`
+- `Fix: Run offbox host destroy <host> --yes to delete it.`
 - `Fix: Repair the environment state before destroying its host.`
 - `Fix: Restore the host's saved provider workspace before destroying it.`
 - `Fix: Run host destroy again after other operations finish.`
@@ -186,6 +203,8 @@ Install commands and declared hash files are explicit configuration. A failed in
 - `Fix: Check local state directory permissions and retry.`
 - `Fix: Check the host sha256sum command and retry.`
 - `Fix: Configure exec.env as environment variable names.`
+- `Fix: Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value.`
+- `Fix: Review exec.env in offbox.toml, then run offbox up to approve it.`
 - `Fix: Remove the conflicting install lock and retry.`
 - `Fix: Remove the host .offbox/install.sha256 marker and retry.`
 - `Fix: Restore an owned directory at <directory>.`
@@ -221,7 +240,6 @@ Resolve conflicting files locally, then reset the exact session identifier shown
 - `Fix: Run mutagen sync terminate <session>, then offbox up to apply the new configuration.`
 - `Fix: Run offbox up to resume source sync.`
 - `Fix: Set sync.ignore to nonempty, single-line patterns without NUL characters.`
-- `Fix: Wait for other sync operations and retry offbox up.`
 
 ## Ports and SSH masters
 
@@ -256,10 +274,18 @@ Do not terminate an unrelated local service just because it holds a preferred po
 - `Fix: Run offbox ports in the affected worktrees before retrying --swap.`
 - `Fix: Run offbox up and check the environment's Docker/Compose configuration.`
 - `Fix: Run offbox up before restoring ports.`
+- `Fix: Run offbox up before swapping ports.`
 - `Fix: Run offbox up in the correct worktree.`
 - `Fix: Stop a competing local listener or remove unused offbox port mappings.`
 - `Fix: Stop that local listener before retrying the swap.`
 - `Fix: Wait for that operation and retry offbox ports.`
+
+`exec` reports port-restore problems as warnings after starting the command; the command's exit status is unaffected:
+
+- `Fix: run offbox ports after it finishes; the next offbox exec also restores them.`
+- `Fix: run offbox ports to finish restoring them.`
+- `Fix: check offbox logs and run offbox ports.`
+- `Fix: list the ports you need in ports.forward in offbox.toml.`
 
 ## Health reports
 
@@ -284,7 +310,7 @@ Do not terminate an unrelated local service just because it holds a preferred po
 
 ## Logs, setup and uninstall
 
-`logs --stack [SERVICE]` reads Compose output without running setup. Noninteractive setup needs an explicit provider/action. Uninstall removes local runtime records; it does not delete remote hosts or stop their billing. Destroy hosts first when you want them gone, and preserve custom providers and credentials under the configuration directory.
+`logs --stack [SERVICE]` reads Compose output without running setup. Noninteractive setup needs an explicit provider/action. Uninstall removes local runtime records; it does not delete remote hosts or stop their billing, and with registered cloud hosts it also requires `--abandon-cloud-hosts`. Destroy hosts first when you want them gone, and preserve custom providers and credentials under the configuration directory.
 
 - `Fix: Run offbox status and check host connectivity.`
 - `Fix: Check log permissions and encoding.`
@@ -293,10 +319,12 @@ Do not terminate an unrelated local service just because it holds a preferred po
 - `Fix: Run offbox up before reading stack logs.`
 - `Fix: Pass --action check, --action create or --action init.`
 - `Fix: Pass --provider hetzner, --provider gcp or --provider ssh.`
-- `Fix: Pass --provider ssh --action init --target USER@ADDRESS --accept-host-key.`
+- `Fix: Pass --provider ssh --action init --target USER@ADDRESS --host-key-fingerprint SHA256:...`
 - `Fix: Run offbox doctor and follow its Fix lines.`
 - `Fix: Pass --provider hetzner, --provider gcp or --provider ssh with an explicit --action.`
 - `Fix: Set GOOGLE_PROJECT before retrying.`
+- `Fix: export HCLOUD_TOKEN=... in your shell profile, or set token under [hetzner] in <credentials> (chmod 600); see <installation guide>#hetzner` See [Hetzner](installation.md#hetzner).
+- `Fix: export GOOGLE_PROJECT=your-project-id and run gcloud auth application-default login; see <installation guide>#google-cloud` See [Google Cloud](installation.md#google-cloud).
 - `Fix: Use --provider ssh --action init --target USER@ADDRESS.`
 - `Fix: Use --provider ssh --action init.`
 - `Fix: Check directory permissions and rerun offbox uninstall --yes.`
@@ -304,6 +332,8 @@ Do not terminate an unrelated local service just because it holds a preferred po
 - `Fix: Restore an owned directory without symlinks before uninstalling.`
 - `Fix: Restore the owned config directory before uninstalling.`
 - `Fix: Run offbox host destroy <host> first for each remaining host, or offbox uninstall --yes to retain the hosts.`
+- `Fix: Run offbox host destroy <host> first for each remaining host, or offbox uninstall --yes --abandon-cloud-hosts to retain the hosts.`
+- `Fix: Run offbox host destroy <host> --yes first for each cloud host, or add --abandon-cloud-hosts to keep them running without local records.`
 - `Fix: Separate offbox config, state, cache and control directories.`
 - `Fix: Wait for other offbox operations to finish and retry uninstall.`
 
@@ -349,4 +379,4 @@ These instructions can arrive through SSH from the packaged host/image scripts. 
 
 Exit 4 can mean command completion is unknown, even if the remote command is still running. Do not retry non-idempotent work blindly. The error includes the run ID and a scoped `offbox-run --signal TERM` cleanup command; inspect the environment and use that command only when you want to stop that run. A confirmed remote exit 255 still returns 255.
 
-A contended routine host operation waits up to 120 seconds, and forwarding waits up to 30 seconds. A timeout retains exclusive locking and asks you to retry after the competing operation finishes. Same-environment dependency installation and destructive lifecycle conflicts still fail immediately.
+A contended routine host operation waits up to 120 seconds, and forwarding waits up to 30 seconds. A timeout retains exclusive locking and asks you to retry after the competing operation finishes. `exec` waits up to ten minutes for a dependency installation already running in the same environment; `up` fails immediately in that case with `Fix: Retry after the current installation finishes.` Destructive lifecycle conflicts also fail immediately.

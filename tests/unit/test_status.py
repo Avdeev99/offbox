@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fakes import FakeRunner, Script
 from pydantic import ValidationError
 
 from offbox import DEFAULT_IMAGE
 from offbox.errors import PreconditionError
 from offbox.naming import Worktree, worktree_name
 from offbox.paths import Paths
-from offbox.runner import FakeRunner, Script
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, State, StateStore
 from offbox.status import Status, StatusCheck, StatusReport, compose_status, registry_config_digest
@@ -157,6 +157,10 @@ def test_changed_remote_config_digest_warns_without_pulling_layers(tmp_path: Pat
     paths, work, host = context(tmp_path)
     entries = scripts(work, host)
     entries[-1].stdout = entries[-1].stdout.replace(DIGEST, "sha256:" + "b" * 64)
+    repository = DEFAULT_IMAGE.rsplit(":", 1)[0]
+    entries.append(
+        remote(host, ["docker", "manifest", "inspect", "--verbose", f"{repository}@{DIGEST}"], returncode=1, stderr="manifest unknown")
+    )
     runner = FakeRunner(entries)
     report = Status(paths, runner).diagnose(cwd=work.root)
     image = next(check for check in report.checks if check.name == "image")
@@ -165,6 +169,69 @@ def test_changed_remote_config_digest_warns_without_pulling_layers(tmp_path: Pat
     assert image.fix == "Run offbox up --fresh."
     assert report.exit_code == 0
     assert not any("pull" in call.argv for call in runner.calls)
+
+
+CONTAINERD_INDEX = "sha256:4c3f1e0d9b8a7f6e5d4c3b2a1908f7e6d5c4b3a29180f7e6d5c4b3a2918070f6"
+FIXTURE_MANIFEST = "sha256:b39a9ceba71e4055894020c60f8563ee84c3a47d4b5debc063f4c2aacae30444"
+FIXTURES = Path(__file__).parents[1] / "fixtures/docker"
+
+
+def containerd_scripts(work: Worktree, host: HostState, running: str, pulled: Script | None) -> list[Script]:
+    entries = scripts(work, host)
+    inspected = json.loads((FIXTURES / "container-inspect-containerd-store.json").read_text())
+    inspected[0].update({"Name": "/" + work.container, "Image": running})
+    inspected[0]["Config"]["Labels"] = {"offbox.env": work.name, "offbox.worktree": str(work.root)}
+    entries[5].stdout = json.dumps(inspected)
+    entries[-1].stdout = (FIXTURES / "manifest-verbose-oci.json").read_text()
+    return [*entries, *([pulled] if pulled else [])]
+
+
+def pinned(host: HostState, stdout: str) -> Script:
+    return remote(host, ["docker", "manifest", "inspect", "--verbose", f"ghcr.io/avdeev99/offbox-universal@{CONTAINERD_INDEX}"], stdout)
+
+
+def test_containerd_store_index_digest_is_resolved_to_the_pulled_config_digest(tmp_path: Path) -> None:
+    paths, work, host = context(tmp_path)
+    runner = FakeRunner(
+        containerd_scripts(work, host, CONTAINERD_INDEX, pinned(host, (FIXTURES / "manifest-verbose-oci.json").read_text()))
+    )
+    report = Status(paths, runner).diagnose(cwd=work.root)
+    image = next(check for check in report.checks if check.name == "image")
+    assert (image.level, image.message) == ("ok", "Image matches the configured image version")
+    assert runner.scripts == []
+
+
+def test_running_manifest_digest_matches_without_a_second_registry_request(tmp_path: Path) -> None:
+    paths, work, host = context(tmp_path)
+    runner = FakeRunner(containerd_scripts(work, host, FIXTURE_MANIFEST, None))
+    report = Status(paths, runner).diagnose(cwd=work.root)
+    image = next(check for check in report.checks if check.name == "image")
+    assert (image.level, image.message) == ("ok", "Image matches the configured image version")
+
+
+def test_containerd_store_index_with_older_config_reports_newer_image(tmp_path: Path) -> None:
+    paths, work, host = context(tmp_path)
+    older = json.dumps(
+        {"Descriptor": {"platform": {"os": "linux", "architecture": "amd64"}}, "OCIManifest": {"config": {"digest": "sha256:" + "c" * 64}}}
+    )
+    report = Status(paths, FakeRunner(containerd_scripts(work, host, CONTAINERD_INDEX, pinned(host, older)))).diagnose(cwd=work.root)
+    image = next(check for check in report.checks if check.name == "image")
+    assert (image.level, image.message) == ("warning", "Newer image available")
+
+
+@pytest.mark.parametrize(
+    ("reference", "repository"),
+    [
+        ("ghcr.io/org/image:1", "ghcr.io/org/image"),
+        ("localhost:5000/image", "localhost:5000/image"),
+        ("localhost:5000/image:tag", "localhost:5000/image"),
+        ("image@sha256:" + "a" * 64, "image"),
+    ],
+)
+def test_image_repository_strips_only_tags_and_digests(reference: str, repository: str) -> None:
+    from offbox.status import image_repository
+
+    assert image_repository(reference) == repository
 
 
 @pytest.mark.parametrize("limits,warning", [([400, 500], False), ([750, 750], True), ([0], True)])

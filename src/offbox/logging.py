@@ -13,6 +13,8 @@ from offbox.paths import Paths
 
 _registered_secrets: set[str] = set()
 _SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|KEY|CREDENTIALS|KEYFILE_JSON)$", re.IGNORECASE)
+_STANDALONE_VALUE_LENGTH = 20
+_NO_LOG_OPTIONS = frozenset({"--help", "--version"})
 _invocation: ContextVar[str] = ContextVar("offbox_invocation", default="")
 _environment: ContextVar[str | None] = ContextVar("offbox_environment", default=None)
 
@@ -24,6 +26,10 @@ class LogEntry(Model):
     level: str
     logger: str
     message: str
+
+
+def current_invocation() -> str:
+    return _invocation.get()
 
 
 def bind_environment(name: str) -> None:
@@ -59,6 +65,19 @@ def register_secrets(env: Mapping[str, str]) -> None:
     _registered_secrets.update(part for value in values for part in value.splitlines() if part)
 
 
+def register_env_values(env: Mapping[str, str]) -> None:
+    """Redact forwarded values as NAME=value; on their own only for secret-looking names or long values, so paths stay readable."""
+    for name, value in env.items():
+        if not value:
+            continue
+        named = _SECRET_NAME.search(name) is not None
+        standalone = named or len(value) >= _STANDALONE_VALUE_LENGTH
+        _registered_secrets.add(f"{name}={value}")
+        if standalone:
+            _registered_secrets.add(value)
+        _registered_secrets.update(part for part in value.splitlines() if part and (named or len(part) >= _STANDALONE_VALUE_LENGTH))
+
+
 def register_exec_secrets(argv: Sequence[str]) -> None:
     command = next((index for index, value in enumerate(argv) if not value.startswith("-")), None)
     if command is None or argv[command] != "exec":
@@ -79,7 +98,7 @@ def register_exec_secrets(argv: Sequence[str]) -> None:
         if entry is not None:
             name, separator, value = entry.partition("=")
             if separator:
-                register_secrets({name: value})
+                register_env_values({name: value})
         index += 1
 
 
@@ -102,13 +121,17 @@ class RedactingFormatter(logging.Formatter):
 def configure(paths: Paths, argv: Sequence[str], day: date | None = None) -> Path:
     current = day or date.today()
     paths.logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+    unpruned: list[Path] = []
     for candidate in paths.logs.glob("*.log"):
         try:
             file_day = date.fromisoformat(candidate.stem)
         except ValueError:
             continue
         if file_day <= current - timedelta(days=14):
-            candidate.unlink()
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                unpruned.append(candidate)
     target = paths.log_file(current)
     handler = logging.FileHandler(target, encoding="utf-8")
     target.chmod(0o600)
@@ -120,5 +143,12 @@ def configure(paths: Paths, argv: Sequence[str], day: date | None = None) -> Pat
     root.setLevel(logging.DEBUG)
     root.addHandler(handler)
     root.propagate = False
-    root.info("invocation argv=%s", [redact(arg) for arg in argv])
+    for candidate in unpruned:
+        root.warning("cannot prune old log %s", candidate)
+    if not _NO_LOG_OPTIONS.intersection(_options(argv)):
+        root.info("invocation argv=%s", [redact(arg) for arg in argv])
     return target
+
+
+def _options(argv: Sequence[str]) -> list[str]:
+    return list(argv[: argv.index("--")] if "--" in argv else argv)

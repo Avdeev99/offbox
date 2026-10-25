@@ -73,10 +73,13 @@ class NestedHostRunner(SubprocessRunner):
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
         timeout: float | None = None,
+        interruptible: bool = False,
     ) -> Result:
         require(argv[0] == "ssh", "Nested-host probe received a non-SSH command")
         nested = ssh_argv(self.host.name, ["docker", "exec", "-u", "root", self.work.container, "sh", "-c", argv[-1]])
-        return super().run(nested, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout)
+        return super().run(
+            nested, check=check, capture=capture, input=input, env=env, cwd=cwd, timeout=timeout, interruptible=interruptible
+        )
 
 
 class Smoke:
@@ -343,16 +346,16 @@ class Smoke:
                     )
                     for work in self.worktrees
                 ]
-                self.clock.sleep(10)
-                require(all(process.poll() is None for process in processes), "Parallel commands did not wait for the held forwarding lock")
+                for process in processes:
+                    require(process.wait(timeout=60) == 0, "Parallel worktree command failed or waited on the held forwarding lock")
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-            for process in processes:
-                require(process.wait(timeout=30) == 0, "Parallel worktree command failed during lock contention")
         finally:
             for process in processes:
                 if process.poll() is None:
                     process.kill()
-        self.complete("Parallel worktree commands wait for contended forwarding locks and both succeed")
+        for work in self.worktrees:
+            self.cli(work, "ports")
+        self.complete("Parallel worktree commands run while forwarding is contended and forwards restore afterwards")
 
     def existing_host_ownership(self) -> None:
         work = self.worktrees[0]
@@ -563,7 +566,7 @@ class Smoke:
         require(self.local_port(first) == ports[0], "stop/up changed the stable local mapping")
         self.cli(first, "exec", "--", "docker", "volume", "inspect", "smoke-data-marker")
         self.response(ports[0], "alpha\n")
-        self.cli(first, "up", "--fresh", timeout=600)
+        self.cli(first, "up", "--fresh", "--yes", timeout=600)
         require(self.cli(first, "exec", "--", "cat", "note.txt").stdout == "updated\n", "fresh removed synced code")
         self.cli(first, "exec", "--", "docker", "volume", "inspect", "smoke-data-marker", expected=1)
         self.response(self.local_port(first), "alpha\n")

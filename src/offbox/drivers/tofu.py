@@ -28,7 +28,7 @@ class TofuDriver:
         }
 
     def _run(self, args: Sequence[str]) -> Result:
-        result = self.runner.run([self.executable, *args], cwd=self.workspace, env=self.env, check=False)
+        result = self.runner.run([self.executable, *args], cwd=self.workspace, env=self.env, check=False, interruptible=True)
         if result.returncode:
             raise CommandFailed([self.executable, *args], result.returncode, redact(result.stderr, self.env))
         return result
@@ -51,6 +51,9 @@ class TofuDriver:
             ) from exc
 
     def destroy(self) -> None:
+        console.step("Initialising provider")
+        with stage("Provider initialization"):
+            self._run(["init", "-input=false"])
         console.step("Destroying host")
         with stage("VM deletion"):
             self._run(["destroy", "-auto-approve", "-input=false"])

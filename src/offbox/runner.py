@@ -8,12 +8,12 @@ import time
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from offbox import console
-from offbox.errors import CommandFailed, OffboxError, PreconditionError
+from offbox.errors import CommandFailed, PreconditionError, ProviderInterrupted
 from offbox.logging import redact, register_secrets
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,7 @@ class Runner(Protocol):
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
         timeout: float | None = None,
+        interruptible: bool = False,
     ) -> Result: ...
 
     def stream(self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False) -> int: ...
@@ -143,18 +144,29 @@ class SubprocessRunner:
             outputs = {stdout: bytearray(), stderr: bytearray()}
             pending = {stdout: bytearray(), stderr: bytearray()}
             names = {stdout: "stdout", stderr: "stderr"}
-            interrupted = False
+            interrupts = 0
 
             def interrupt() -> None:
-                nonlocal deadline, interrupted
-                if interrupted:
-                    raise KeyboardInterrupt
-                interrupted = True
-                with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGINT)
-                stop_deadline = time.monotonic() + 30
-                deadline = stop_deadline if deadline is None else min(deadline, stop_deadline)
-                console.warn("Interrupt received; allowing the provider to save state.")
+                nonlocal interrupts
+                interrupts += 1
+                if interrupts == 1:
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGINT)
+                    console.warn("Interrupt received; waiting for the provider to save state. Do not close this terminal.")
+                elif interrupts == 2:
+                    console.warn(
+                        "The provider is still finishing and recording created resources. "
+                        "Press Ctrl-C again to force-stop it; untracked cloud resources may keep billing."
+                    )
+                else:
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                    raise ProviderInterrupted(
+                        "Provider operation was force-stopped before saving its state",
+                        "Check the provider console for resources labelled offbox-host and delete them, then run offbox host destroy NAME.",
+                        killed=True,
+                    )
 
             try:
                 with selectors.DefaultSelector() as selector:
@@ -183,8 +195,10 @@ class SubprocessRunner:
                         break
                     except KeyboardInterrupt:
                         interrupt()
-                if interrupted:
-                    raise OffboxError("Provider operation interrupted", "Run offbox host list and destroy the interrupted host.", 130)
+                if interrupts:
+                    raise ProviderInterrupted(
+                        "Provider operation interrupted", "Run offbox host list and destroy the interrupted host.", killed=False
+                    )
             except (OSError, subprocess.TimeoutExpired, KeyboardInterrupt):
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
@@ -204,10 +218,11 @@ class SubprocessRunner:
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
         timeout: float | None = None,
+        interruptible: bool = False,
     ) -> Result:
         start, values = self._start(argv, env)
         try:
-            if capture and input is None and env is not None and env.get("TF_IN_AUTOMATION") == "1":
+            if interruptible:
                 completed = self._run_logged(argv, values, cwd, timeout)
             else:
                 completed = subprocess.run(
@@ -257,119 +272,3 @@ class SubprocessRunner:
             logger.error("stream launch failed duration=%.3f", time.monotonic() - started)
             raise PreconditionError(f"Cannot run {argv[0]}", f"Install {argv[0]} and check its permissions.") from exc
         return _SubprocessStream(process, grouped=not tty, started=started)
-
-
-class Call(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    method: Literal["run", "stream", "start_stream"]
-    argv: list[str]
-    check: bool = True
-    capture: bool = True
-    input: str | None = None
-    env: dict[str, str] | None = None
-    cwd: Path | None = None
-    timeout: float | None = None
-    stdin: bool = False
-    tty: bool = False
-
-
-class Script(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    prefix: list[str]
-    returncode: int = 0
-    stdout: str = ""
-    stderr: str = ""
-    method: Literal["run", "stream", "start_stream"] = "run"
-    stream_results: list[int | None] = Field(default_factory=list[int | None])
-
-
-class FakeStreamProcess:
-    def __init__(self, returncode: int, results: Sequence[int | None] = ()) -> None:
-        self.results = list(results) if results else [returncode]
-        self.returncode: int | None = None
-        self.waits: list[float | None] = []
-        self.killed = False
-
-    def poll(self) -> int | None:
-        if self.returncode is None:
-            code = self.results.pop(0) if self.results else None
-            if code is not None:
-                self.returncode = code
-        return self.returncode
-
-    def wait(self, timeout: float | None = None) -> int | None:
-        self.waits.append(timeout)
-        result = self.poll()
-        while result is None and timeout is None:
-            if not self.results:
-                raise PreconditionError(
-                    "Fake stream has no scripted completion", "Use a bounded wait, kill it, or script a completion status."
-                )
-            result = self.poll()
-        return result
-
-    def kill(self) -> None:
-        if self.poll() is None:
-            self.killed = True
-            self.returncode = -signal.SIGKILL
-            self.results.clear()
-
-
-class FakeRunner:
-    def __init__(self, scripts: Sequence[Script] = ()) -> None:
-        self.scripts = list(scripts)
-        self.calls: list[Call] = []
-        self.processes: list[FakeStreamProcess] = []
-
-    def _script(self, call: Call) -> Script:
-        self.calls.append(call)
-        for index, script in enumerate(self.scripts):
-            if call.method == script.method and call.argv[: len(script.prefix)] == script.prefix:
-                self.scripts.pop(index)
-                return script
-        raise PreconditionError(f"Unexpected {call.method} call: {call.argv}", "Script this command in FakeRunner.")
-
-    def _match(self, call: Call) -> Result:
-        script = self._script(call)
-        return Result(argv=call.argv, returncode=script.returncode, stdout=script.stdout, stderr=script.stderr)
-
-    def run(
-        self,
-        argv: Sequence[str],
-        *,
-        check: bool = True,
-        capture: bool = True,
-        input: str | None = None,
-        env: Mapping[str, str] | None = None,
-        cwd: Path | None = None,
-        timeout: float | None = None,
-    ) -> Result:
-        call = Call(
-            method="run",
-            argv=list(argv),
-            check=check,
-            capture=capture,
-            input=input,
-            env=dict(env) if env is not None else None,
-            cwd=cwd,
-            timeout=timeout,
-        )
-        result = self._match(call)
-        if check and result.returncode:
-            raise CommandFailed(argv, result.returncode, result.stderr)
-        return result
-
-    def stream(self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False) -> int:
-        return self._match(
-            Call(method="stream", argv=list(argv), env=dict(env) if env is not None else None, stdin=stdin, tty=tty)
-        ).returncode
-
-    def start_stream(
-        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
-    ) -> StreamProcess:
-        call = Call(method="start_stream", argv=list(argv), capture=False, env=dict(env) if env is not None else None, stdin=stdin, tty=tty)
-        script = self._script(call)
-        process = FakeStreamProcess(script.returncode, script.stream_results)
-        self.processes.append(process)
-        return process

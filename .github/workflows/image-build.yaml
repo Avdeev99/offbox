@@ -6,6 +6,9 @@ on:
       publish:
         type: boolean
         required: true
+      refresh:
+        type: boolean
+        default: false
 
 jobs:
   image:
@@ -58,6 +61,7 @@ jobs:
           outputs: |
             type=oci,dest=${{ runner.temp }}/offbox-image.tar
             ${{ inputs.publish && 'type=image,push=true' || '' }}
+          no-cache: ${{ inputs.refresh }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Report compressed image size
