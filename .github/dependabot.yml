@@ -3,21 +3,14 @@ updates:
   - package-ecosystem: uv
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      python:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-  - package-ecosystem: docker
-    directory: /images/universal
-    schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: ubuntu
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-  - package-ecosystem: terraform
-    directories:
-      - /providers/hetzner
-      - /providers/gcp
-    schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
