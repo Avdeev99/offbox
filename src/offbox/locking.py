@@ -9,12 +9,12 @@ if TYPE_CHECKING:
     from offbox.host.ready import Clock
 
 
-def acquire_lock(descriptor: int, *, timeout: float = 0, clock: Clock, message: str, fix: str) -> None:
+def acquire_lock(descriptor: int, *, timeout: float = 0, clock: Clock, message: str, fix: str, shared: bool = False) -> None:
     timer = clock
     deadline: float | None = None
     while True:
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
             return
         except BlockingIOError as exc:
             if timeout <= 0:

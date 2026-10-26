@@ -8,10 +8,12 @@ from pydantic import ValidationError
 from offbox.errors import CommandFailed, ConnectionError_, PreconditionError, UsageError
 from offbox.host.ready import Clock, SystemClock
 from offbox.logging import LogEntry, current_invocation
+from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.runner import Runner
 from offbox.runtime import Runtime
 from offbox.ssh import ssh_argv
+from offbox.state import HostState
 
 _PENDING_INVOCATIONS = 256
 
@@ -96,7 +98,11 @@ def stack_logs(paths: Paths, runner: Runner, *, follow: bool = False, service: s
     if service is not None and (not service or service.startswith("-") or any(ord(character) < 32 for character in service)):
         raise UsageError("Invalid Compose service", "Pass a Compose service name after --stack.")
     runtime = Runtime(paths, runner)
-    work, _env, host = runtime.current(cwd)
+    with runtime.using("offbox logs --stack", cwd) as (work, _env, host):
+        return _stack_logs(runtime, runner, work, host, follow=follow, service=service)
+
+
+def _stack_logs(runtime: Runtime, runner: Runner, work: Worktree, host: HostState, *, follow: bool, service: str | None) -> int:
     container = runtime.inspect(host, work)
     if container is None or not container.state.running:
         raise PreconditionError("Environment is not running", "Run offbox up before reading stack logs.")

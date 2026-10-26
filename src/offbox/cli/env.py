@@ -65,7 +65,8 @@ def list_envs(ctx: typer.Context, json: Annotated[bool, typer.Option("--json", h
         console.info("No environments registered")
     else:
         for env in report.envs:
-            console.info(f"{env.name}  {env.host}  {env.status}  {env.worktree}")
+            used = f"  last used {env.last_used.astimezone().strftime('%Y-%m-%d %H:%M')}" if env.last_used else ""
+            console.info(f"{env.name}  {env.host}  {env.status}  {env.worktree}{used}")
             if env.fix:
                 console.warn(f"Fix: {env.fix}")
 

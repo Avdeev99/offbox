@@ -10,6 +10,7 @@ from offbox.drivers.none import NoneDriver
 from offbox.drivers.tofu import TofuDriver
 from offbox.errors import OffboxError, PreconditionError, ProviderInterrupted, UsageError
 from offbox.host import host_operation, select_host
+from offbox.host.activity import forget as forget_activity
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.providers import credentials_env, load_provider, validate_name
@@ -65,7 +66,9 @@ def _destroy_cloud(runner: Runner, host: HostState, workspace: Path, cache: Path
         raise ProviderInterrupted(f"Destroying host {host.name} was interrupted", fix, killed=exc.killed) from exc
 
 
-def _destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, executable: Path | None = None, forget: bool = False) -> None:
+def destroy_host_locked(
+    paths: Paths, runner: Runner, name: str | None = None, *, executable: Path | None = None, forget: bool = False
+) -> None:
     host = select_host(paths, name)
     validate_name(host.name)
     directory = paths.state / "hosts" / host.name
@@ -114,6 +117,8 @@ def _destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, exec
         if state.default_host == host.name:
             state.default_host = next((name for name, item in state.hosts.items() if item.phase == "ready"), None)
         sync_config(paths, state)
+    for env_name in envs:
+        forget_activity(paths, env_name)
     try:
         shutil.rmtree(directory)
     except OSError as exc:
@@ -134,4 +139,4 @@ def _destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, exec
 def destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, executable: Path | None = None, forget: bool = False) -> None:
     host = select_host(paths, name)
     with host_operation(paths, host.name):
-        _destroy_host(paths, runner, host.name, executable=executable, forget=forget)
+        destroy_host_locked(paths, runner, host.name, executable=executable, forget=forget)

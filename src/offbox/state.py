@@ -28,6 +28,9 @@ class HostState(Model):
     provider_files_hash: str | None = None
     known_hosts_path: Path
     ssh_key: Path | None = None
+    auto: bool = False
+    idle_seconds: int | None = Field(default=None, gt=0)
+    create_interrupted: bool = False
 
 
 class EnvState(Model):

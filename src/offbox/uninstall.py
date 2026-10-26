@@ -8,6 +8,7 @@ from pathlib import Path
 from offbox import console
 from offbox.errors import OffboxError, PreconditionError
 from offbox.host import host_operation
+from offbox.host.timer import remove as remove_reaper
 from offbox.logging import close_logs
 from offbox.paths import Paths
 from offbox.providers import load_provider
@@ -85,6 +86,8 @@ def uninstall(
         for host in cloud:
             console.warn(f"Abandoning cloud host {_describe(host)}; delete it in the provider console to stop billing.")
         console.warn(f"Hosts remain remotely: {names}. Their local provisioning state will be removed.")
+    if remove_reaper(paths, runner):
+        console.info("Removed the idle reaper timer")
     with ExitStack() as locks:
         for name in sorted(state.hosts):
             locks.enter_context(host_operation(paths, name))

@@ -10,7 +10,7 @@ from offbox import console
 from offbox.config import HostPreset, Model, UserConfig, load_config
 from offbox.drivers.base import HostVariables
 from offbox.drivers.tofu import TofuDriver
-from offbox.errors import OffboxError, PreconditionError, ProviderInterrupted
+from offbox.errors import CommandFailed, OffboxError, PreconditionError, ProviderInterrupted
 from offbox.host import host_operation, public_key
 from offbox.host.cloudinit import generate_host_key, render_cloud_init
 from offbox.host.ready import Clock, SystemClock, tcp_probe, wait_ready
@@ -23,6 +23,11 @@ from offbox.timings import stage
 from offbox.tools import ToolDiscovery
 
 logger = logging.getLogger(__name__)
+_NAME_TAKEN = ("uniqueness_error", "alreadyExists", "already exists")
+
+
+def _name_taken(exc: CommandFailed) -> bool:
+    return any(marker in exc.stderr_tail for marker in _NAME_TAKEN)
 
 
 class CreateOptions(Model):
@@ -31,6 +36,8 @@ class CreateOptions(Model):
     size: str | None = None
     region: str | None = None
     ssh_key: Path | None = None
+    auto: bool = False
+    idle_seconds: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -46,7 +53,7 @@ def _remove_unrecorded(directory: Path) -> None:
         console.warn(f"Remove {directory} before retrying host creation.")
 
 
-def _create_host(
+def create_host_locked(
     paths: Paths,
     runner: Runner,
     options: CreateOptions,
@@ -104,6 +111,8 @@ def _create_host(
                 known_hosts_path=directory / "known_hosts",
                 ssh_key=key,
                 phase="creating",
+                auto=options.auto,
+                idle_seconds=options.idle_seconds,
             )
             state.hosts[host.name] = host
         recorded = True
@@ -123,7 +132,16 @@ def _create_host(
             user_data=render_cloud_init(authorized_key, private, public),
             labels={"offbox": "1", "offbox-host": host.name},
         )
-        output = TofuDriver(runner, workspace, paths.cache, credentials, binary).create(variables)
+        try:
+            output = TofuDriver(runner, workspace, paths.cache, credentials, binary).create(variables)
+        except CommandFailed as exc:
+            if _name_taken(exc):
+                raise PreconditionError(
+                    f"Cloud resources named offbox-{host.name} already exist in the provider project",
+                    "Delete them in the provider console or choose another host name, "
+                    f"then run offbox host destroy {host.name} to clear the local record.",
+                ) from exc
+            raise
         host.address = output.ip
         host.ssh_user = output.ssh_user
         host.phase = "initializing"
@@ -140,9 +158,14 @@ def _create_host(
         host.phase = "ready"
         with store.transaction() as state:
             state.hosts[host.name] = host
-            if state.default_host is None:
+            if state.default_host is None and not host.auto:
                 state.default_host = host.name
     except ProviderInterrupted as exc:
+        if exc.killed:
+            host.create_interrupted = True
+            with store.transaction() as state:
+                if state.hosts.get(host.name) is not None:
+                    state.hosts[host.name] = host
         fix = (
             f"Run offbox host destroy {host.name}, then check the provider console for resources labelled "
             f"offbox-host={host.name} and delete any that remain."
@@ -172,4 +195,4 @@ def create_host(
     ssh_config: Path | None = None,
 ) -> HostState:
     with host_operation(paths, options.name):
-        return _create_host(paths, runner, options, executable=executable, clock=clock, probe=probe, ssh_config=ssh_config)
+        return create_host_locked(paths, runner, options, executable=executable, clock=clock, probe=probe, ssh_config=ssh_config)

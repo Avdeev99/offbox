@@ -1,5 +1,6 @@
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -10,9 +11,16 @@ from typer.core import TyperCommand
 
 from offbox import console
 from offbox.config import Model
-from offbox.errors import OffboxError, PreconditionError
+from offbox.errors import OffboxError, PreconditionError, UsageError
 from offbox.host import select_host
+from offbox.host.auto import HostWarning, dismiss_warning, host_activity, read_warnings, timer_status
+from offbox.host.auto import reap as reap_hosts
 from offbox.host.destroy import destroy_host
+from offbox.host.timer import health as timer_health
+from offbox.host.timer import install as install_reaper
+from offbox.host.timer import installed as timer_installed
+from offbox.host.timer import remove as remove_reaper
+from offbox.host.usage import shared_usage, utc_now
 from offbox.paths import Paths
 from offbox.providers import validate_name
 from offbox.runner import Runner, SubprocessRunner
@@ -30,10 +38,17 @@ class HostSummary(Model):
     reachable: bool
     phase: Literal["creating", "initializing", "ready"]
     default: bool
+    auto: bool = False
+    idle_seconds: int | None = None
+    last_activity: datetime | None = None
+    reaps_after: datetime | None = None
 
 
 class HostReport(Model):
     hosts: list[HostSummary] = Field(default_factory=list[HostSummary])
+    timer_installed: bool = False
+    timer_warning: str | None = None
+    warnings: list[HostWarning] = Field(default_factory=list[HostWarning])
 
 
 def host_report(paths: Paths, runner: Runner) -> HostReport:
@@ -48,6 +63,7 @@ def host_report(paths: Paths, runner: Runner) -> HostReport:
                 )
             except OffboxError:
                 reachable = False
+        activity = host_activity(paths, state, host) if host.auto else None
         return HostSummary(
             name=host.name,
             provider=host.provider,
@@ -56,10 +72,25 @@ def host_report(paths: Paths, runner: Runner) -> HostReport:
             reachable=reachable,
             phase=host.phase,
             default=state.default_host == host.name,
+            auto=host.auto,
+            idle_seconds=host.idle_seconds,
+            last_activity=activity,
+            reaps_after=activity + timedelta(seconds=host.idle_seconds) if activity is not None and host.idle_seconds else None,
         )
 
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(state.hosts)))) as executor:
-        return HostReport(hosts=list(executor.map(describe, [host for _, host in sorted(state.hosts.items())])))
+        hosts = list(executor.map(describe, [host for _, host in sorted(state.hosts.items())]))
+    last_run, failure = timer_status(paths)
+    return HostReport(
+        hosts=hosts,
+        timer_installed=timer_installed(paths),
+        timer_warning=timer_health(paths, utc_now(), last_run, failure),
+        warnings=read_warnings(paths),
+    )
+
+
+def _when(moment: datetime) -> str:
+    return moment.astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def use_host(paths: Paths, name: str) -> None:
@@ -135,18 +166,43 @@ def init(
 
 
 @app.command("list")
-def list_hosts(ctx: typer.Context, json: Annotated[bool, typer.Option("--json", help="Emit a typed JSON report.")] = False) -> None:
-    """List registered hosts and their reachability."""
-    report = host_report(Paths.discover(), _runner(ctx))
+def list_hosts(
+    ctx: typer.Context,
+    json: Annotated[bool, typer.Option("--json", help="Emit a typed JSON report.")] = False,
+    dismiss: Annotated[str | None, typer.Option("--dismiss", help="Clear the stored warning for this host name.")] = None,
+) -> None:
+    """List registered hosts, their reachability and auto-managed lifecycle."""
+    paths = Paths.discover()
+    if dismiss is not None:
+        validate_name(dismiss)
+        if dismiss_warning(paths, dismiss):
+            console.success(f"Dismissed the warning for {dismiss}")
+        else:
+            console.info(f"No warning stored for {dismiss}")
+        return
+    report = host_report(paths, _runner(ctx))
     if json:
         console.json_out(report)
-    elif not report.hosts:
+        return
+    if not report.hosts:
         console.info("No hosts registered")
-    else:
-        for host in report.hosts:
-            console.info(
-                f"{host.name}  {host.provider}  {host.ip or 'pending'}  envs={host.envs}  reachable={'yes' if host.reachable else 'no'}  {host.phase}"
-            )
+    for host in report.hosts:
+        line = f"{host.name}  {host.provider}  {host.ip or 'pending'}  envs={host.envs}  reachable={'yes' if host.reachable else 'no'}  {host.phase}"
+        if host.auto:
+            idle = f"idle limit {host.idle_seconds // 60}m" if host.idle_seconds else "idle reaping off"
+            line += f"  auto ({idle}"
+            if host.last_activity is not None:
+                line += f", last used {_when(host.last_activity)}"
+            if host.reaps_after is not None:
+                line += f", reaped after {_when(host.reaps_after)}"
+            line += ")"
+        console.info(line)
+    for warning in report.warnings:
+        console.warn(f"{warning.message}. Fix: offbox host list --dismiss {warning.host} once checked.")
+    if report.timer_warning:
+        console.warn(report.timer_warning)
+    elif any(host.auto and host.idle_seconds for host in report.hosts) and not report.timer_installed:
+        console.info("Idle reaping needs the timer: offbox host reap --install-timer")
 
 
 @app.command()
@@ -202,5 +258,48 @@ def ssh(ctx: typer.Context, name: Annotated[str | None, typer.Argument(help="Hos
     tty = not command
     if tty and not sys.stdin.isatty():
         raise PreconditionError("Interactive SSH requires a TTY", "Pass a command after -- for noninteractive SSH.")
-    code = _runner(ctx).stream(ssh_argv(host.name, command, options=["-t"] if tty else []), stdin=tty, tty=tty)
+    with shared_usage(Paths.discover(), host.name, "offbox host ssh"):
+        code = _runner(ctx).stream(ssh_argv(host.name, command, options=["-t"] if tty else []), stdin=tty, tty=tty)
     raise typer.Exit(code)
+
+
+@app.command()
+def reap(
+    ctx: typer.Context,
+    name: Annotated[str | None, typer.Argument(help="Auto-managed host to check. Default: every auto-managed host.")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be destroyed without changing anything.")] = False,
+    json: Annotated[bool, typer.Option("--json", help="Emit a typed JSON report.")] = False,
+    install_timer: Annotated[
+        bool, typer.Option("--install-timer", help="Run the reaper every 15 minutes from launchd or systemd.")
+    ] = False,
+    remove_timer: Annotated[bool, typer.Option("--remove-timer", help="Remove the scheduled reaper.")] = False,
+    from_timer: Annotated[bool, typer.Option("--from-timer", hidden=True, help="Record this run as the scheduled reaper's.")] = False,
+) -> None:
+    """Destroy idle auto-managed hosts and hosts whose creation never finished."""
+    paths, runner = Paths.discover(), _runner(ctx)
+    if install_timer and remove_timer:
+        raise UsageError("Choose --install-timer or --remove-timer", "Run one of them.")
+    if install_timer:
+        install_reaper(paths, runner)
+        return
+    if remove_timer:
+        if remove_reaper(paths, runner):
+            console.success("Idle reaper removed")
+        else:
+            console.info("No idle reaper installed")
+        return
+    report = reap_hosts(paths, runner, name, dry_run=dry_run, source="timer" if from_timer else "manual")
+    if json:
+        console.json_out(report)
+    else:
+        if not report.hosts:
+            console.info("No auto-managed hosts")
+        for outcome in report.hosts:
+            action = "would destroy" if outcome.action == "destroy" else outcome.action
+            lost = f"; environments lost: {', '.join(outcome.lost_environments)}" if outcome.lost_environments else ""
+            message = f"{outcome.name}: {action} ({outcome.reason}{lost})"
+            if outcome.action == "failed":
+                console.error(message, outcome.error)
+            else:
+                console.info(message)
+    raise typer.Exit(report.exit_code)

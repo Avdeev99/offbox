@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path, PurePosixPath
 from types import FrameType
+from typing import TYPE_CHECKING
 
 from pydantic import Field, SecretStr, ValidationError
 
@@ -33,8 +34,11 @@ from offbox.providers import load_provider
 from offbox.runner import Runner, StreamProcess
 from offbox.share import Sharing, check_sharing
 from offbox.ssh import ssh_argv
-from offbox.state import HostState
+from offbox.state import EnvState, HostState
 from offbox.timings import measured, stage
+
+if TYPE_CHECKING:
+    from offbox.runtime import Runtime
 
 logger = logging.getLogger(__name__)
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -693,7 +697,12 @@ class Executor:
         from offbox.runtime import Runtime
 
         runtime = Runtime(self.paths, self.runner, clock=self.clock)
-        work, recorded, host = runtime.current(cwd)
+        with runtime.using("offbox exec", cwd) as (work, recorded, host):
+            return self._execute(runtime, work, recorded, host, options, cwd=cwd)
+
+    def _execute(
+        self, runtime: "Runtime", work: Worktree, recorded: EnvState, host: HostState, options: ExecOptions, *, cwd: Path | None
+    ) -> int:
         project = load_project(self.paths, work.root)
         install_paths(project.install.when)
         check_exec_env(self.paths, project.exec.env)

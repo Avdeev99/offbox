@@ -395,3 +395,24 @@ These instructions can arrive through SSH from the packaged host/image scripts. 
 Exit 4 can mean command completion is unknown, even if the remote command is still running. Do not retry non-idempotent work blindly. The error includes the run ID and a scoped `offbox-run --signal TERM` cleanup command; inspect the environment and use that command only when you want to stop that run. A confirmed remote exit 255 still returns 255.
 
 A contended routine host operation waits up to 120 seconds, and forwarding waits up to 30 seconds. A timeout retains exclusive locking and asks you to retry after the competing operation finishes. `exec` waits up to ten minutes for a dependency installation already running in the same environment; `up` fails immediately in that case with `Fix: Retry after the current installation finishes.` Destructive lifecycle conflicts also fail immediately.
+
+## Auto-managed hosts and the idle reaper
+
+`offbox host reap --dry-run` explains every decision. `offbox host list` shows idle limits, last use and stored warnings; `offbox doctor` reports reaper problems.
+
+- `Fix: Run offbox host destroy <name>, then retry.` (a creation that never finished)
+- `Fix: Delete them in the provider console or choose another host name, then run offbox host destroy <name> to clear the local record.`
+- `Fix: Retry the command once the destroy finishes; it recreates an auto-managed host.`
+- `Fix: Retry the command.` (the host selection changed while a command started)
+- `Fix: Run offbox setup, set env.host, or offbox host use NAME.`
+- `Fix: run offbox host reap <name> once they finish, or install the idle reaper with offbox host reap --install-timer.`
+- `Fix: Store the Hetzner token in <credentials.toml> (mode 0600) instead of only exporting HCLOUD_TOKEN.`
+- `Fix: Export the required variables before installing the timer: <fix>`
+- `Fix: Run gcloud auth application-default login, then retry.`
+- `Fix: Install it with uv tool install offbox, then retry.`
+- `Fix: Run offbox host reap from your own scheduler.`
+- `Fix: Check offbox host reap and its timer logs.`
+- `Fix: offbox doctor, or reinstall with offbox host reap --install-timer.`
+- `Fix: offbox host list --dismiss <name> once checked.`
+- `Fix: offbox up (host <name> was reaped at <time> (<reason>); its Docker data is gone)`
+- `Fix: add git to the image or set git.mirror = false.`

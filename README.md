@@ -97,7 +97,7 @@ See [limits](docs/limits.md) for the full operating model.
 
 ## Configuration and examples
 
-An `offbox.toml` at the Git worktree root configures resources, dependency installation, stack commands, forwards, sync ignores, forwarded variables, copied files and the git mirror. Every key is optional, and each can also come from your user config (for every repository), an uncommitted `offbox.local.toml` or an `OFFBOX_*` variable; `offbox config` shows the result and where each value came from. The environment gets a real Git repository by default. See the [complete configuration reference](docs/configuration.md).
+An `offbox.toml` at the Git worktree root configures resources, dependency installation, stack commands, forwards, sync ignores, forwarded variables, copied files and the git mirror. Every key is optional, and each can also come from your user config (for every repository), an uncommitted `offbox.local.toml` or an `OFFBOX_*` variable; `offbox config` shows the result and where each value came from. The environment gets a real Git repository by default. With `auto = true` on a host preset, offbox creates the VM when a worktree first needs it and destroys it after the last one is removed or it sits idle, so a forgotten VM does not keep billing. See the [complete configuration reference](docs/configuration.md).
 
 - [FastAPI + Postgres](examples/python-compose/): real database-backed API and tests, with ports 8000 and 5432.
 - [Vite + Playwright](examples/node-playwright/): a small web app and browser test, with port 3000.

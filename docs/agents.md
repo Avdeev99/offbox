@@ -19,6 +19,10 @@ A remote command can itself exit with codes 1–4. When execution and status com
 
 `offbox config --json` reports every effective project setting of the current worktree as a `settings` array of `key`, `value` (`null` when unset), `source` (`default`, `user`, `project`, `local` or `env`) and `env`, the `OFFBOX_*` variable that overrides it, plus the `user`, `project` and `local` file paths under `files`, whether or not they exist. Agents can change a setting for one command without editing files, for example `OFFBOX_GIT_MIRROR=false offbox exec -- make lint`. See [how settings combine](configuration.md#how-project-settings-combine).
 
+## Auto-managed hosts
+
+With an auto-managed host ([configuration](configuration.md#auto-managed-hosts)), `offbox up` may spend a few minutes creating the VM, and `offbox rm` of the last environment destroys it. Agents should run `offbox rm --yes` when their work in a worktree is finished, so the VM stops billing. `offbox host reap --json` reports what was kept or destroyed and exits 1 if any host failed. `up`, `exec` and similar commands wait up to 10 minutes while a host is being destroyed, then fail with `Host NAME is being destroyed`; running them again recreates the host.
+
 ## Diagnostics
 
 `offbox doctor --json` emits a report with a `checks` array and exits 0 when every check passes, otherwise 3. Each check includes its name, success status, message, and an actionable fix for failure. Human diagnostics use `offbox doctor`.

@@ -642,10 +642,18 @@ class Smoke:
             self.run_command(["docker", "container", "inspect", work.container], expected=1)
             self.run_command(["docker", "volume", "inspect", work.volume], expected=1)
         require(StateStore(self.paths.state).read().envs == {}, "rm retained environment state")
+        require(self.host.name in StateStore(self.paths.state).read().hosts, "rm of the last environment removed a manual host")
+        reaped = json.loads(self.cli(first, "host", "reap", self.host.name, "--dry-run", "--json").stdout)
+        require(
+            [(item["action"], item["reason"]) for item in reaped["hosts"]] == [("skipped", "manual host")],
+            f"host reap did not treat the SSH host as manual: {reaped}",
+        )
         self.cli(first, "gc", "--yes")
         self.run_command(["docker", "container", "inspect", f"offbox-smoke-sentinel-{self.fixture_id}"])
         self.run_command(["docker", "volume", "inspect", f"offbox-smoke-sentinel-{self.fixture_id}"])
-        self.complete("rm removes owned state/resources/sync; unowned sentinel container and volume survive rm/gc")
+        self.complete(
+            "rm removes owned state/resources/sync and keeps the manual host; unowned sentinel container and volume survive rm/gc"
+        )
 
     def cleanup(self) -> None:
         failed: list[str] = []

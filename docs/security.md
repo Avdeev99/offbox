@@ -2,6 +2,10 @@
 
 Offbox is for one user's trusted development projects on a personal VM. Each worktree runs in a privileged container with its own Docker daemon. Privileged containers and Docker-group membership confer host-level control; environment containers do not provide a security boundary against hostile code or other users.
 
+## Auto-managed hosts
+
+Automatic creation and destruction apply only to hosts whose user preset says `auto = true` and that offbox created that way; manual and existing SSH hosts are never touched. A repository's `env.host` can only select among your auto-managed presets. Destroying an auto-managed host deletes the VM and everything on it, including environments of worktrees that still exist. The scheduled reaper runs `offbox host reap` with your user account and no secrets in its unit file; it reads the same credentials file as interactive commands.
+
 ## SSH trust and accounts
 
 Cloud provisioning generates an Ed25519 host key locally, supplies it through cloud-init, and writes its public half to the local `known_hosts` file before the first connection. Connections require that pinned key. Existing SSH hosts use explicit fingerprint confirmation instead: verify the displayed fingerprint through a trusted channel before accepting it. Replacing a host key requires a deliberate trust update.
