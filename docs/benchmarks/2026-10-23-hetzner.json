@@ -25,7 +25,7 @@
       "cpus": 1,
       "memory": "2g"
     },
-    "universal_image": "ghcr.io/avdeev99/offbox-universal@sha256:b8a57d964220ed595bc54fea2bc34327c97401a7b8df1aab9f129f25a88e68b1"
+    "universal_image": "ghcr.io/o-avdieiev/offbox-universal@sha256:b8a57d964220ed595bc54fea2bc34327c97401a7b8df1aab9f129f25a88e68b1"
   },
   "latencies": {
     "local-python-noop": {

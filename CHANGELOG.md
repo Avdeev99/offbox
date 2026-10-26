@@ -103,6 +103,6 @@ Initial source skeleton; not published to PyPI.
 - Linux/macOS CI and trusted-publisher release workflow.
 - Contributor instructions and packaging configuration for future host, image and provider resources.
 
-[Unreleased]: https://github.com/Avdeev99/offbox/commits/master
-[0.1.0]: https://github.com/Avdeev99/offbox/issues/1
-[0.0.1]: https://github.com/Avdeev99/offbox/tree/37ba5be5c132161441ca045def3edb5da26e9065
+[Unreleased]: https://github.com/o-avdieiev/offbox/commits/master
+[0.1.0]: https://github.com/o-avdieiev/offbox/issues/1
+[0.0.1]: https://github.com/o-avdieiev/offbox/tree/37ba5be5c132161441ca045def3edb5da26e9065

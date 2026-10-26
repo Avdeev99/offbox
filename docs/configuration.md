@@ -40,7 +40,7 @@ Sources, later wins: default < user < project < local < env
   project  /home/me/src/app/offbox.toml
   local    /home/me/src/app/offbox.local.toml (not present)
 
-env.image        "ghcr.io/avdeev99/offbox-universal:1"                        default  OFFBOX_ENV_IMAGE
+env.image        "ghcr.io/o-avdieiev/offbox-universal:1"                        default  OFFBOX_ENV_IMAGE
 env.dockerfile   unset                                                         default  OFFBOX_ENV_DOCKERFILE
 env.cpus         6.0                                                           env      OFFBOX_ENV_CPUS
 env.memory       unset                                                         default  OFFBOX_ENV_MEMORY

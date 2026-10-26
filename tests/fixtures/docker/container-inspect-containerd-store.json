@@ -7,7 +7,7 @@
 			"Status": "running"
 		},
 		"Config": {
-			"Image": "ghcr.io/avdeev99/offbox-universal:1",
+			"Image": "ghcr.io/o-avdieiev/offbox-universal:1",
 			"Labels": {
 				"offbox.env": "project-abcd",
 				"offbox.worktree": "/src/project"

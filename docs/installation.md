@@ -29,7 +29,7 @@ Offbox runs on your laptop and drives one Ubuntu 24.04 amd64 host over SSH. You 
 3. **Install offbox** with the installer:
 
    ```sh
-   curl -LsSf https://raw.githubusercontent.com/Avdeev99/offbox/master/install.sh | sh
+   curl -LsSf https://raw.githubusercontent.com/o-avdieiev/offbox/master/install.sh | sh
    ```
 
    The [installer](../install.sh) checks git and ssh, installs [uv](https://docs.astral.sh/uv/) with its official installer if it is missing, installs offbox with `uv tool install`, and then starts `offbox setup` when run from a terminal. uv provides Python 3.12+ for the tool if your system lacks it.
@@ -38,7 +38,7 @@ Offbox runs on your laptop and drives one Ubuntu 24.04 amd64 host over SSH. You 
 
    ```sh
    curl -LsSf https://astral.sh/uv/install.sh | sh
-   uv tool install git+https://github.com/Avdeev99/offbox
+   uv tool install git+https://github.com/o-avdieiev/offbox
    ```
 
 4. **Run setup** if the installer did not start it:

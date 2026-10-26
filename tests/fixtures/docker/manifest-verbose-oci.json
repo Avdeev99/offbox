@@ -1,6 +1,6 @@
 [
 	{
-		"Ref": "ghcr.io/avdeev99/offbox-universal:1@sha256:b39a9ceba71e4055894020c60f8563ee84c3a47d4b5debc063f4c2aacae30444",
+		"Ref": "ghcr.io/o-avdieiev/offbox-universal:1@sha256:b39a9ceba71e4055894020c60f8563ee84c3a47d4b5debc063f4c2aacae30444",
 		"Descriptor": {
 			"mediaType": "application/vnd.oci.image.manifest.v1+json",
 			"digest": "sha256:b39a9ceba71e4055894020c60f8563ee84c3a47d4b5debc063f4c2aacae30444",
@@ -59,7 +59,7 @@
 		}
 	},
 	{
-		"Ref": "ghcr.io/avdeev99/offbox-universal:1@sha256:3d171f5a1bcc4e92da0aaa0a56a092015c75014e3b7523ac333006fadc5f3eba",
+		"Ref": "ghcr.io/o-avdieiev/offbox-universal:1@sha256:3d171f5a1bcc4e92da0aaa0a56a092015c75014e3b7523ac333006fadc5f3eba",
 		"Descriptor": {
 			"mediaType": "application/vnd.oci.image.manifest.v1+json",
 			"digest": "sha256:3d171f5a1bcc4e92da0aaa0a56a092015c75014e3b7523ac333006fadc5f3eba",

@@ -155,7 +155,7 @@ def hetzner_token(path: Path, env: Mapping[str, str] | None = None) -> SecretStr
         return saved
     raise PreconditionError(
         "Missing Hetzner credentials",
-        "Set HCLOUD_TOKEN or hetzner.token in credentials.toml (mode 0600); see https://github.com/Avdeev99/offbox/blob/master/docs/installation.md#hetzner.",
+        "Set HCLOUD_TOKEN or hetzner.token in credentials.toml (mode 0600); see https://github.com/o-avdieiev/offbox/blob/master/docs/installation.md#hetzner.",
     )
 
 

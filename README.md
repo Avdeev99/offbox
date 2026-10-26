@@ -1,7 +1,7 @@
 # offbox
 
-[![Test](https://github.com/Avdeev99/offbox/actions/workflows/test.yaml/badge.svg?branch=master)](https://github.com/Avdeev99/offbox/actions/workflows/test.yaml)
-[![License: MIT](https://img.shields.io/github/license/Avdeev99/offbox)](LICENSE)
+[![Test](https://github.com/o-avdieiev/offbox/actions/workflows/test.yaml/badge.svg?branch=master)](https://github.com/o-avdieiev/offbox/actions/workflows/test.yaml)
+[![License: MIT](https://img.shields.io/github/license/o-avdieiev/offbox)](LICENSE)
 [![Python 3.12 | 3.13](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](pyproject.toml)
 
 Give every git worktree its own Docker stack on one cloud VM you own. Your compose files don't change.
@@ -15,7 +15,7 @@ On a Google Cloud `e2-standard-4` VM, a warm `offbox exec -- true` took a median
 macOS, Linux, or Windows via WSL2 · git and ssh — `offbox setup` installs the rest.
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Avdeev99/offbox/master/install.sh | sh   # installs uv + offbox, runs offbox setup
+curl -LsSf https://raw.githubusercontent.com/o-avdieiev/offbox/master/install.sh | sh   # installs uv + offbox, runs offbox setup
 cd your-repo
 offbox up
 offbox exec -- pytest
