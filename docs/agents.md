@@ -15,6 +15,10 @@ The CLI prints human diagnostics to stderr and machine-readable results to stdou
 
 A remote command can itself exit with codes 1–4. When execution and status commands are available, agents that need to distinguish an offbox failure from a command failure should run `offbox status --json` after a nonzero exit.
 
+## Configuration
+
+`offbox config --json` reports every effective project setting of the current worktree as a `settings` array of `key`, `value` (`null` when unset), `source` (`default`, `user`, `project`, `local` or `env`) and `env`, the `OFFBOX_*` variable that overrides it, plus the `user`, `project` and `local` file paths under `files`, whether or not they exist. Agents can change a setting for one command without editing files, for example `OFFBOX_GIT_MIRROR=false offbox exec -- make lint`. See [how settings combine](configuration.md#how-project-settings-combine).
+
 ## Diagnostics
 
 `offbox doctor --json` emits a report with a `checks` array and exits 0 when every check passes, otherwise 3. Each check includes its name, success status, message, and an actionable fix for failure. Human diagnostics use `offbox doctor`.
@@ -41,7 +45,7 @@ One local lock per environment coordinates hash checking, installation and marke
 
 Ctrl-C, SIGTERM and SIGHUP sent to `offbox exec` are relayed to the remote process group. A non-TTY command without `--stdin` also stops when its client disappears without relaying anything, for example after SIGKILL, a closed laptop lid or a dropped network: a watcher on the host holds the client's SSH stdin open and, when it closes, sends TERM to the remote run and KILL ten seconds later. Commands started with `--stdin` or a TTY keep the earlier behaviour and can outlive a killed client; use `offbox host ssh HOST -- docker exec CONTAINER offbox-run --signal TERM ID` to stop one.
 
-Commands run by offbox see `OFFBOX_ENV=<env>`, which callers can use to avoid routing a nested command through offbox again.
+Commands started by `offbox exec`, `up` stages and `offbox shell` see `OFFBOX_ENV=<env>`, which callers can use to avoid routing a nested command through offbox again.
 
 `offbox --help` lists the currently implemented commands.
 

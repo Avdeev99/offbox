@@ -14,13 +14,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from offbox import DEFAULT_IMAGE, __version__, console
-from offbox.config import EnvConfig, Model, ProjectConfig, load_config
+from offbox.config import EnvConfig, Model
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
 from offbox.host import host_operation, select_host
 from offbox.host.ready import Clock, SystemClock
 from offbox.naming import Worktree, find_worktree, validate_env_name
 from offbox.paths import Paths
 from offbox.ports import PortManager
+from offbox.project import load_project
 from offbox.runner import Result, Runner
 from offbox.ssh import ssh_argv
 from offbox.state import EnvState, HostState, StateStore
@@ -365,7 +366,7 @@ class Runtime:
         from offbox.share import Sharing, git_sharing, sharing_additions
 
         work = find_worktree(self.runner, cwd)
-        project = load_config(work.root / "offbox.toml", ProjectConfig)
+        project = load_project(self.paths, work.root)
         install_paths(project.install.when)
         execution_env(project.exec.env, {}, tty=False)
         check_exec_env(self.paths, project.exec.env)
@@ -676,7 +677,11 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
             raise PreconditionError("Environment is not running", "Run offbox up before opening a shell.")
         self._owned(work, container)
         return self.runner.stream(
-            ssh_argv(host.name, ["docker", "exec", "-it", "-u", "dev", "-w", "/work", work.container, "bash", "-l"], options=["-t"]),
+            ssh_argv(
+                host.name,
+                ["docker", "exec", "-it", "-u", "dev", "-w", "/work", "-e", f"OFFBOX_ENV={work.name}", work.container, "bash", "-l"],
+                options=["-t"],
+            ),
             stdin=True,
             tty=True,
         )

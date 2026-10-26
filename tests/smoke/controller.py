@@ -303,9 +303,7 @@ class Smoke:
             require(result.stdout == "", "up wrote setup output to stdout")
             result = self.cli(work, "exec", "--", "cat", "note.txt")
             require(result.stdout == "initial\n", "Initial source file did not sync")
-            self.cli(
-                work, "exec", "--", "sh", "-c", "test ! -e /work/.git && test ! -e /work/node_modules && test -f /work/install-complete"
-            )
+            self.cli(work, "exec", "--", "sh", "-c", "test -d /work/.git && test ! -e /work/node_modules && test -f /work/install-complete")
         require(
             (first.root / "compose.yaml").read_bytes() == (second.root / "compose.yaml").read_bytes(),
             "Compose files differ between worktrees",
@@ -315,7 +313,7 @@ class Smoke:
         self.cli(first, "exec", "--", "sh", "-c", "printf 'generated\\n' > generated.txt")
         self.cli(first, "exec", "--", "true")
         require((first.root / "generated.txt").read_text() == "generated\n", "Remote generated file did not sync back")
-        self.complete("Real Mutagen flushes preserve linked .git/node_modules ignores and two-way updates")
+        self.complete("Real Mutagen flushes keep linked .git pointers and node_modules local; the default git mirror creates /work/.git")
         result = self.cli(first, "exec", "--", "sh", "-c", "printf user-out; printf user-err >&2")
         require(result.stdout == "user-out" and result.stderr == "user-err", "Command stdout/stderr were changed or mixed")
         require(

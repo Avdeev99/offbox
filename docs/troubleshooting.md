@@ -39,7 +39,7 @@ Correct the named file or key, then retry. Keep provider workspaces and state un
 
 - `Fix: Check the host CPU and memory information.`
 - `Fix: Correct <path>; keep permissions at 0600.`
-- `Fix: Correct these keys in <path>.`
+- `Fix: Correct these keys in <source>.` (a file path, `<config.toml> [project]` or `OFFBOX_* environment variables`)
 - `Fix: Fix the TOML syntax and permissions in <path>.`
 - `Fix: Set HCLOUD_TOKEN or hetzner.token in credentials.toml (mode 0600); see https://github.com/Avdeev99/offbox/blob/master/docs/installation.md#hetzner.`
 - `Fix: chmod 600 <path>`
@@ -203,15 +203,23 @@ Install commands and declared hash files are explicit configuration. A failed in
 - `Fix: Check local state directory permissions and retry.`
 - `Fix: Check the host sha256sum command and retry.`
 - `Fix: Configure exec.env as environment variable names.`
-- `Fix: Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value.`
-- `Fix: Review exec.env in offbox.toml, then run offbox up to approve it.`
-- `Fix: Review files.copy and git in offbox.toml, then run offbox up to approve them.`
+- `Fix: Remove them from exec.env (offbox config shows which source sets it); pass one value with offbox exec --env NAME=value.`
+- `Fix: Review exec.env with offbox config, then run offbox up to approve it.`
+- `Fix: Review files.copy and git with offbox config, then run offbox up to approve them.`
 - `Fix: Use paths below your home directory written as ~/path/to/file.`
-- `Fix: Remove SSH, GnuPG and offbox configuration files from files.copy in offbox.toml.`
-- `Fix: Create <file> or remove <entry> from files.copy in offbox.toml.`
+- `Fix: Remove SSH, GnuPG and offbox configuration files from files.copy; offbox config shows which source sets it.`
+- `Fix: Create <file> or remove <entry> from files.copy; offbox config shows which source sets it.`
 - `Fix: Copy large files another way.`
 - `Fix: Name refs such as origin/main in git.refs.`
-- `Fix: Check offbox status, then retry; set git.mirror = false in offbox.toml to run without git.`
+- `Fix: Fetch it or remove it from git.refs; offbox config shows which source sets it.`
+- `Fix: Check git in the environment image, then retry; set git.mirror = false (or OFFBOX_GIT_MIRROR=false) to run without git.`
+- `Fix: add git to the image or set git.mirror = false.`
+- `Fix: Check the repository's info/exclude permissions.`
+- `Fix: Check offbox status, then retry; set git.mirror = false (or OFFBOX_GIT_MIRROR=false) to run without git.`
+- `Fix: Unset <variable>; setting variables are OFFBOX_<SECTION>_<KEY> for keys in the configuration reference.`
+- `Fix: Correct the named settings in config.toml, offbox.toml, offbox.local.toml or OFFBOX_* variables.`
+- `Fix: Report this offbox bug.`
+- `Fix: Use [section] tables with plain TOML values in <file>.`
 - `Fix: Remove the conflicting install lock and retry.`
 - `Fix: Remove the host .offbox/install.sha256 marker and retry.`
 - `Fix: Restore an owned directory at <directory>.`

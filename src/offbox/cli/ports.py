@@ -3,10 +3,10 @@ from typing import Annotated
 import typer
 
 from offbox import console
-from offbox.config import ProjectConfig, load_config
 from offbox.errors import OffboxError
 from offbox.host import host_operation
 from offbox.paths import Paths
+from offbox.project import load_project
 from offbox.runner import SubprocessRunner
 from offbox.runtime import Runtime
 
@@ -28,7 +28,7 @@ def ports(
     paths = Paths.discover()
     runtime = Runtime(paths, runner)
     work, _env, host = runtime.current()
-    config = load_config(work.root / "offbox.toml", ProjectConfig)
+    config = load_project(paths, work.root)
     with host_operation(paths, host.name, wait_timeout=120, clock=runtime.clock):
         report = runtime.ports.restore(work, host, config.ports)
     if swap is not None:

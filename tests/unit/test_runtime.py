@@ -486,7 +486,13 @@ def test_shell_uses_recorded_host_and_exact_tty_command(tmp_path: Path) -> None:
         ]
     )
     assert Runtime(paths, runner).shell(cwd=root) == 42
-    assert runner.calls[-1].argv == ["ssh", "-t", "offbox-main", "--", f"docker exec -it -u dev -w /work offbox-{name} bash -l"]
+    assert runner.calls[-1].argv == [
+        "ssh",
+        "-t",
+        "offbox-main",
+        "--",
+        f"docker exec -it -u dev -w /work -e OFFBOX_ENV={name} offbox-{name} bash -l",
+    ]
     assert runner.calls[-1].stdin is True
     assert runner.calls[-1].tty is True
 

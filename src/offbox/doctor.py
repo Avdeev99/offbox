@@ -2,9 +2,10 @@ from pathlib import Path
 
 from pydantic import Field
 
-from offbox.config import Credentials, Model, ProjectConfig, UserConfig, default_host, load_config, load_credentials
+from offbox.config import Credentials, Model, UserConfig, default_host, load_config, load_credentials
 from offbox.errors import OffboxError, PreconditionError
 from offbox.paths import Paths
+from offbox.project import load_project
 from offbox.runner import Runner
 from offbox.ssh import default_ssh_key
 from offbox.state import State, StateStore
@@ -86,7 +87,7 @@ def diagnose(
                 detected = runner.run(["git", "rev-parse", "--show-toplevel"], check=False, cwd=root, timeout=5)
                 if detected.returncode == 0 and detected.stdout.strip():
                     root = Path(detected.stdout.strip())
-        load_config(root / "offbox.toml", ProjectConfig)
+        load_project(paths, root)
         report.checks.append(Check(name="project-config", ok=True, message="Project config parses"))
     except OffboxError as exc:
         report.checks.append(_failure("project-config", exc))

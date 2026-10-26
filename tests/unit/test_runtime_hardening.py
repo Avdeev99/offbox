@@ -117,9 +117,10 @@ def test_up_approves_and_forces_sharing_before_install(
 ) -> None:
     from offbox.share import Sharing
 
+    monkeypatch.delenv("OFFBOX_GIT_MIRROR")
     paths, _host, root = runtime_setup(tmp_path)
     name = worktree_name(root)
-    (root / "offbox.toml").write_text('[files]\ncopy=["~/token"]\n[git]\nmirror=true\nrefs=["origin/main"]\n')
+    (root / "offbox.toml").write_text('[files]\ncopy=["~/token"]\n[git]\nrefs=["origin/main"]\n')
     with StateStore(paths.state).transaction() as state:
         state.envs[name] = EnvState(
             name=name, host="main", worktree_path=root, created_at=datetime.now(UTC), approved_files=previous, approved_git=previous
@@ -137,10 +138,10 @@ def test_up_approves_and_forces_sharing_before_install(
     recorded = StateStore(paths.state).read().envs[name]
     assert applied == [True]
     assert recorded.approved_files == ["~/token"]
-    assert recorded.approved_git == ["HEAD", "origin/main"]
+    assert recorded.approved_git == ["HEAD", "origin/HEAD", "origin/main"]
     error = " ".join(capsys.readouterr().err.split())
     assert ("Copying new local files to the environment: ~/token" in error) is warned
-    assert ("Mirroring new git refs to the environment: HEAD, origin/main" in error) is warned
+    assert ("Mirroring new git refs to the environment: HEAD, origin/HEAD, origin/main" in error) is warned
 
 
 def test_up_refuses_credential_variables_in_exec_env_before_remote_work(tmp_path: Path) -> None:

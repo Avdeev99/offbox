@@ -7,6 +7,7 @@ from typer.core import TyperGroup
 from typer.exceptions import Abort, Exit
 
 from offbox import __version__, console
+from offbox.cli.config import register as register_config_command
 from offbox.cli.env import register as register_env_commands
 from offbox.cli.exec import register as register_exec_command
 from offbox.cli.host import app as host_app
@@ -71,6 +72,7 @@ register_env_commands(app)
 register_exec_command(app)
 register_ports_command(app)
 register_misc_commands(app)
+register_config_command(app)
 
 
 def _version_callback(value: bool) -> None:

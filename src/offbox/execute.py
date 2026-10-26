@@ -19,7 +19,7 @@ from types import FrameType
 from pydantic import Field, SecretStr, ValidationError
 
 from offbox import console
-from offbox.config import InstallConfig, Model, PortsConfig, ProjectConfig, load_config
+from offbox.config import InstallConfig, Model, PortsConfig, ProjectConfig
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError, UsageError
 from offbox.host import host_operation
 from offbox.host.ready import Clock, SystemClock
@@ -28,6 +28,7 @@ from offbox.logging import register_env_values, register_secrets
 from offbox.naming import Worktree, validate_env_name
 from offbox.paths import Paths
 from offbox.ports import PortContainer, PortManager, PortSnapshot, compose_discovery
+from offbox.project import load_project
 from offbox.providers import load_provider
 from offbox.runner import Runner, StreamProcess
 from offbox.share import Sharing, check_sharing
@@ -66,6 +67,7 @@ class Preflight(Model):
     install: str
     compose: str
     compose_failed: bool
+    repository: bool = True
 
 
 def parse_env(entries: Sequence[str]) -> dict[str, SecretStr]:
@@ -101,7 +103,7 @@ def check_exec_env(paths: Paths, configured: Sequence[str]) -> None:
     if blocked:
         raise PreconditionError(
             "exec.env must not forward provider credentials: " + ", ".join(blocked),
-            "Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value.",
+            "Remove them from exec.env (offbox config shows which source sets it); pass one value with offbox exec --env NAME=value.",
         )
 
 
@@ -343,8 +345,11 @@ $marker"
         fi
     fi
 fi
+repository=false
+[ ! -d "$work/.git" ] || repository=true
 printf '%s\n' "$inspection" | jq -c --arg install "$install" --arg compose "$compose" --argjson compose_failed "$compose_failed" \
-    '{containers: ., install: $install, compose: $compose, compose_failed: $compose_failed}'
+    --argjson repository "$repository" \
+    '{containers: ., install: $install, compose: $compose, compose_failed: $compose_failed, repository: $repository}'
 """
 )
 
@@ -689,14 +694,14 @@ class Executor:
 
         runtime = Runtime(self.paths, self.runner, clock=self.clock)
         work, recorded, host = runtime.current(cwd)
-        project = load_config(work.root / "offbox.toml", ProjectConfig)
+        project = load_project(self.paths, work.root)
         install_paths(project.install.when)
         check_exec_env(self.paths, project.exec.env)
         unapproved = unapproved_exec_env(project.exec.env, recorded.approved_exec_env)
         if unapproved:
             raise PreconditionError(
                 "exec.env forwards variables that offbox up has not approved: " + ", ".join(unapproved),
-                "Review exec.env in offbox.toml, then run offbox up to approve it.",
+                "Review exec.env with offbox config, then run offbox up to approve it.",
             )
         check_sharing(project, recorded)
         local = (cwd or Path.cwd()).resolve()
@@ -718,7 +723,9 @@ class Executor:
                 except OffboxError:
                     logger.warning("Cannot pause sync for a stopped environment", exc_info=True)
             raise PreconditionError("Environment is not running", "offbox up")
-        Sharing(self.runner).apply(runtime.store, work, host, project, force=False, git=not options.no_sync)
+        Sharing(self.runner).apply(
+            runtime.store, work, host, project, force=False, git=not options.no_sync, repository=preflight.repository
+        )
         probe = parse_install_probe(preflight.install) if project.install.command is not None else None
         self.install(work, host, project.install, env=env, probe=probe)
         snapshot = None if preflight.compose_failed else PortSnapshot(containers=preflight.containers, compose=preflight.compose)

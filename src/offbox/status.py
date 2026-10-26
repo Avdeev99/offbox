@@ -5,12 +5,13 @@ from typing import Literal
 
 from pydantic import Field, TypeAdapter, ValidationError, model_validator
 
-from offbox.config import Model, ProjectConfig, load_config
+from offbox.config import Model, ProjectConfig
 from offbox.errors import OffboxError, PreconditionError
 from offbox.host import host_operation
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.ports import PortsReport
+from offbox.project import load_project
 from offbox.runner import Runner
 from offbox.runtime import ContainerInfo, DockerModel, HostResources, Runtime
 from offbox.state import HostState
@@ -258,7 +259,7 @@ class Status:
         self.report.env, self.report.host = work.name, host.name
         project: ProjectConfig | None = None
         try:
-            project = load_config(work.root / "offbox.toml", ProjectConfig)
+            project = load_project(self.runtime.paths, work.root)
         except OffboxError as exc:
             self.report.checks.append(StatusCheck(name="config", level="error", message=exc.message, fix=exc.fix or "Correct offbox.toml."))
 
