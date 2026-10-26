@@ -50,7 +50,10 @@ def test_copy_path_rejects_paths_outside_home(entry: str) -> None:
         copy_path(entry)
 
 
-@pytest.mark.parametrize("entry", ["~/.ssh/id_ed25519", "~/.ssh", "~/.config/offbox/credentials.toml", "~/.gnupg/secring.gpg"])
+@pytest.mark.parametrize(
+    "entry",
+    ["~/.ssh/id_ed25519", "~/.ssh", "~/.SSH/id_ed25519", "~/.config/offbox/credentials.toml", "~/.Config/Offbox/x", "~/.gnupg/secring.gpg"],
+)
 def test_copy_path_refuses_keys_and_offbox_credentials(entry: str) -> None:
     with pytest.raises(PreconditionError, match="files.copy must not copy"):
         copy_path(entry)
@@ -310,10 +313,15 @@ def test_images_without_git_skip_the_mirror_with_one_warning(tmp_path: Path, cap
 
     store = store_with(tmp_path, env(work), host)
     sharing = GitlessSharing([plan])
-    sharing.apply(store, work, host, project(mirror=True), force=False)
-    sharing.apply(store, work, host, project(mirror=True), force=False)
+    for _ in range(3):
+        sharing.apply(store, work, host, project(mirror=True), force=False, repository=False)
     assert sharing.pushed == [plan]
+    assert store.read().envs[work.name].mirrored_git == f"no-git:{plan.fingerprint()}"
     assert capsys.readouterr().err.count("The environment image has no git, so the git mirror was skipped.") == 1
+    moved = MirrorPlan(head="b" * 40, branch=None, refs={}, exclude="")
+    sharing.plans = [moved]
+    sharing.apply(store, work, host, project(mirror=True), force=False, repository=False)
+    assert sharing.pushed == [plan, moved]
 
 
 def test_failed_checkout_names_the_git_error_and_the_opt_out(tmp_path: Path) -> None:

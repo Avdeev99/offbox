@@ -80,9 +80,15 @@ def copy_path(entry: str) -> PurePosixPath:
         or any(ord(char) < 32 or ord(char) == 127 for char in entry)
     ):
         raise PreconditionError(f"Invalid files.copy entry: {entry}", "Use paths below your home directory written as ~/path/to/file.")
-    if any(relative.is_relative_to(blocked) for blocked in _BLOCKED_COPIES):
+    if _blocked(relative):
         raise PreconditionError(f"files.copy must not copy {entry}", _BLOCKED_FIX)
     return relative
+
+
+def _blocked(relative: PurePosixPath) -> bool:
+    """Case-insensitive, because macOS home directories usually are."""
+    folded = PurePosixPath(str(relative).casefold())
+    return any(folded.is_relative_to(blocked) for blocked in _BLOCKED_COPIES)
 
 
 def unapproved(configured: Sequence[str], approved: Sequence[str] | None) -> list[str]:
@@ -143,7 +149,7 @@ class Sharing:
                     raise PreconditionError(f"files.copy source is not a regular file: {source}", fix)
                 home = self.home.resolve()
                 resolved = source.resolve()
-                if not resolved.is_relative_to(home) or any(resolved.is_relative_to(home / blocked) for blocked in _BLOCKED_COPIES):
+                if not resolved.is_relative_to(home) or _blocked(PurePosixPath(resolved.relative_to(home).as_posix())):
                     raise PreconditionError(f"files.copy must not copy {entry}, which resolves to {resolved}", _BLOCKED_FIX)
                 if source.stat().st_size > MAX_COPY_BYTES:
                     raise PreconditionError(f"files.copy source is larger than 1 MiB: {source}", "Copy large files another way.")
@@ -261,13 +267,16 @@ class Sharing:
             with stage("Git mirror"):
                 plan = self.plan(work.root, project.git.refs)
                 if plan is not None:
-                    stale = force or not repository or plan.fingerprint() != recorded.mirrored_git
-                    if stale and not self.mirror(work, host, plan):
-                        console.warn(
-                            "The environment image has no git, so the git mirror was skipped. "
-                            "Fix: add git to the image or set git.mirror = false."
-                        )
-                    mirrored = plan.fingerprint()
+                    fingerprint = plan.fingerprint()
+                    skipped = f"no-git:{fingerprint}"
+                    unchanged = recorded.mirrored_git == fingerprint and repository
+                    if force or not (unchanged or recorded.mirrored_git == skipped):
+                        mirrored = fingerprint if self.mirror(work, host, plan) else skipped
+                        if mirrored == skipped:
+                            console.warn(
+                                "The environment image has no git, so the git mirror was skipped. "
+                                "Fix: add git to the image or set git.mirror = false."
+                            )
         if copied == recorded.copied_files and mirrored == recorded.mirrored_git:
             return
         with store.transaction() as state:
