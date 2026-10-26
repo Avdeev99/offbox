@@ -15,7 +15,7 @@ from offbox.ssh import default_ssh_key, ensure_include, sync_config
 from offbox.state import StateStore
 from offbox.tools import ToolDiscovery, download_prompt, install_mutagen
 
-INSTALLATION_DOCS = "https://github.com/Avdeev99/offbox/blob/master/docs/installation.md"
+INSTALLATION_DOCS = "https://github.com/o-avdieiev/offbox/blob/master/docs/installation.md"
 KEYGEN_COMMAND = 'ssh-keygen -t ed25519 -N "" -C offbox -f ~/.ssh/offbox_ed25519'
 
 

@@ -68,7 +68,7 @@ The maintainer must configure a [pending trusted publisher](https://docs.pypi.or
    | Field | Value |
    | --- | --- |
    | PyPI project name | `offbox` |
-   | GitHub owner | `Avdeev99` |
+   | GitHub owner | `o-avdieiev` |
    | Repository | `offbox` |
    | Workflow filename | `release.yaml` |
    | Environment name | `pypi` |

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-OFFBOX_SOURCE="${OFFBOX_SOURCE:-git+https://github.com/Avdeev99/offbox}"
+OFFBOX_SOURCE="${OFFBOX_SOURCE:-git+https://github.com/o-avdieiev/offbox}"
 
 say() {
   printf '%s\n' "$*" >&2

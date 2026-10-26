@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Oleksii Avdieiev", email = "50865612+Avdeev99@users.noreply.github.com" }]
+authors = [{ name = "Oleksii Avdieiev", email = "50865612+o-avdieiev@users.noreply.github.com" }]
 keywords = ["docker", "docker-compose", "git-worktree", "remote-development", "coding-agents", "mutagen", "ssh", "hetzner", "gcp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -32,11 +32,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Avdeev99/offbox"
-Repository = "https://github.com/Avdeev99/offbox"
-Documentation = "https://github.com/Avdeev99/offbox/tree/master/docs"
-Changelog = "https://github.com/Avdeev99/offbox/blob/master/CHANGELOG.md"
-Issues = "https://github.com/Avdeev99/offbox/issues"
+Homepage = "https://github.com/o-avdieiev/offbox"
+Repository = "https://github.com/o-avdieiev/offbox"
+Documentation = "https://github.com/o-avdieiev/offbox/tree/master/docs"
+Changelog = "https://github.com/o-avdieiev/offbox/blob/master/CHANGELOG.md"
+Issues = "https://github.com/o-avdieiev/offbox/issues"
 
 [project.scripts]
 offbox = "offbox.cli:app"

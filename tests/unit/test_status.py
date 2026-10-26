@@ -187,7 +187,7 @@ def containerd_scripts(work: Worktree, host: HostState, running: str, pulled: Sc
 
 
 def pinned(host: HostState, stdout: str) -> Script:
-    return remote(host, ["docker", "manifest", "inspect", "--verbose", f"ghcr.io/avdeev99/offbox-universal@{CONTAINERD_INDEX}"], stdout)
+    return remote(host, ["docker", "manifest", "inspect", "--verbose", f"ghcr.io/o-avdieiev/offbox-universal@{CONTAINERD_INDEX}"], stdout)
 
 
 def test_containerd_store_index_digest_is_resolved_to_the_pulled_config_digest(tmp_path: Path) -> None:

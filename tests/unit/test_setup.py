@@ -308,7 +308,7 @@ def test_missing_credentials_name_the_variable_and_docs(
         setup(paths, FakeRunner(), SetupOptions(provider=provider, action="check"), ssh_config=config)
     assert caught.value.fix is not None
     assert caught.value.fix.startswith(variable)
-    assert caught.value.fix.endswith(f"https://github.com/Avdeev99/offbox/blob/master/docs/installation.md{anchor}")
+    assert caught.value.fix.endswith(f"https://github.com/o-avdieiev/offbox/blob/master/docs/installation.md{anchor}")
 
 
 @pytest.mark.parametrize(
