@@ -30,6 +30,8 @@ Direct Node, Go, uv, Bun, mise and rustup artifacts have embedded SHA256 checksu
 
 `offbox-run --signal INT|TERM|KILL ID` targets a non-TTY process group after checking its recorded start time and current group identity. It signals with `kill -SIGNAL -- -PGID`, the form procps-ng accepts for process groups. Completed runs are harmless to signal again. TTY commands use terminal controls; the external helper refuses to signal their shared terminal group. Completed records and orphaned metadata older than one day are cleaned on new runs; valid active records are retained.
 
+Custom images used with `env.image` or `env.dockerfile` must keep these scripts, the `dev` user with UID 1000 and home `/home/dev`, the inner Docker daemon and its ready file, and `git` on `PATH` for the [git mirror](configuration.md#git-mirror) (or set `git.mirror = false`).
+
 ## Build and publication
 
 The GitHub image workflow builds amd64 natively, checks both scripts with ShellCheck and exports an OCI archive to measure compressed image content. Pull requests do not publish. `master` changes publish compatibility/commit tags; version tags add release aliases. See [contributor publication setup](../CONTRIBUTING.md#universal-image-and-one-time-ghcr-setup).

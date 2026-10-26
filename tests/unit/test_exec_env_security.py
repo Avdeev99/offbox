@@ -123,11 +123,12 @@ def test_secret_named_and_long_forwarded_values_are_redacted_anywhere() -> None:
     assert redact("short-k42 https://long-value.test/k42", {}) == "[REDACTED] [REDACTED]"
 
 
-def test_exec_refuses_unapproved_file_copies_and_git_mirror_before_remote_work(tmp_path: Path) -> None:
+def test_exec_refuses_unapproved_file_copies_and_git_mirror_before_remote_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OFFBOX_GIT_MIRROR")
     paths, root, _name = setup(tmp_path, [], [])
-    (root / "offbox.toml").write_text('[files]\ncopy=["~/.config/gcloud/adc.json"]\n[git]\nmirror=true\n')
+    (root / "offbox.toml").write_text('[files]\ncopy=["~/.config/gcloud/adc.json"]\n[git]\nmirror=true\nrefs=["origin/dev"]\n')
     runner = FakeRunner([Script(prefix=["git"], stdout=str(root))])
     with pytest.raises(PreconditionError) as caught:
         Executor(paths, runner).execute(ExecOptions(command=["true"]), cwd=root)
-    assert caught.value.message == "offbox up has not approved sharing: files.copy ~/.config/gcloud/adc.json, git HEAD"
+    assert caught.value.message == "offbox up has not approved sharing: files.copy ~/.config/gcloud/adc.json, git origin/dev"
     assert len(runner.calls) == 1

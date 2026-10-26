@@ -58,36 +58,44 @@ def test_copy_path_refuses_keys_and_offbox_credentials(entry: str) -> None:
 
 def test_git_sharing_lists_head_and_refs_only_when_mirroring() -> None:
     assert git_sharing(GitConfig(mirror=False, refs=["origin/main"])) == []
-    assert git_sharing(GitConfig(mirror=True, refs=["origin/main", "origin/main", "a"])) == ["HEAD", "a", "origin/main"]
+    assert git_sharing(GitConfig(mirror=True, refs=["origin/main", "origin/main", "a", "HEAD"])) == [
+        "HEAD",
+        "origin/HEAD",
+        "a",
+        "origin/main",
+    ]
 
 
 def test_exec_refuses_sharing_that_up_has_not_approved(tmp_path: Path) -> None:
     work, _ = context(tmp_path)
-    recorded = env(work, approved_files=[], approved_git=["HEAD"])
+    recorded = env(work, approved_files=[], approved_git=["HEAD", "origin/HEAD"])
     with pytest.raises(PreconditionError) as caught:
         check_sharing(project(copy=["~/token"], mirror=True, refs=["origin/main"]), recorded)
     assert caught.value.message == "offbox up has not approved sharing: files.copy ~/token, git origin/main"
-    assert caught.value.fix == "Review files.copy and git in offbox.toml, then run offbox up to approve them."
+    assert caught.value.fix == "Review files.copy and git with offbox config, then run offbox up to approve them."
 
 
 def test_approved_or_removed_sharing_runs(tmp_path: Path) -> None:
     work, _ = context(tmp_path)
-    recorded = env(work, approved_files=["~/token", "~/old"], approved_git=["HEAD", "origin/main"])
+    recorded = env(work, approved_files=["~/token", "~/old"], approved_git=["HEAD", "origin/HEAD", "origin/main"])
     check_sharing(project(copy=["~/token"], mirror=True), recorded)
     check_sharing(project(), recorded)
 
 
-def test_environments_without_recorded_approval_refuse_any_sharing(tmp_path: Path) -> None:
+def test_environments_from_before_approval_accept_only_the_default_mirror(tmp_path: Path) -> None:
     work, _ = context(tmp_path)
-    with pytest.raises(PreconditionError, match="git HEAD"):
-        check_sharing(project(mirror=True), env(work))
+    check_sharing(project(mirror=True), env(work))
+    with pytest.raises(PreconditionError, match="git origin/dev$"):
+        check_sharing(project(mirror=True, refs=["origin/dev"]), env(work))
+    with pytest.raises(PreconditionError, match="files.copy ~/token$"):
+        check_sharing(project(copy=["~/token"]), env(work))
 
 
 def test_up_warns_about_new_sharing_but_not_on_first_approval(tmp_path: Path) -> None:
     work, _ = context(tmp_path)
     configured = project(copy=["~/token"], mirror=True, refs=["origin/main"])
     assert sharing_additions(configured, env(work)) == []
-    assert sharing_additions(configured, env(work, approved_files=[], approved_git=["HEAD"])) == [
+    assert sharing_additions(configured, env(work, approved_files=[], approved_git=["HEAD", "origin/HEAD"])) == [
         "Copying new local files to the environment: ~/token",
         "Mirroring new git refs to the environment: origin/main",
     ]
@@ -151,7 +159,8 @@ def test_plan_resolves_head_branch_refs_and_exclude(tmp_path: Path) -> None:
     runner = FakeRunner(
         [
             Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "HEAD^{commit}"], stdout=head + "\n"),
-            Script(prefix=["git", "-C", str(root), "symbolic-ref"], stdout="feature/x\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "--short", "HEAD"], stdout="feature/x\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], stdout="refs/remotes/origin/main\n"),
             Script(
                 prefix=["git", "-C", str(root), "rev-parse", "--symbolic-full-name", "origin/main"], stdout="refs/remotes/origin/main\n"
             ),
@@ -171,6 +180,7 @@ def test_plan_detached_head_and_non_ref_names(tmp_path: Path) -> None:
             Script(prefix=["git", "-C", str(root), "rev-parse", "--verify"], stdout="a" * 40 + "\n"),
             Script(prefix=["git", "-C", str(root), "symbolic-ref"], returncode=1),
             Script(prefix=["git", "-C", str(root), "rev-parse", "--git-path"], stdout=".git/info/exclude\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref"], returncode=1),
         ]
     )
     assert Sharing(runner).plan(root, []) == MirrorPlan(head="a" * 40, branch=None, refs={}, exclude="")
@@ -183,6 +193,21 @@ def test_plan_detached_head_and_non_ref_names(tmp_path: Path) -> None:
     )
     with pytest.raises(PreconditionError, match="git.refs entry is not a branch or tag: abc123"):
         Sharing(runner).plan(root, ["abc123"])
+
+
+def test_plan_adds_the_remote_default_branch(tmp_path: Path) -> None:
+    root = tmp_path / "app"
+    root.mkdir()
+    runner = FakeRunner(
+        [
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "HEAD^{commit}"], stdout="a" * 40 + "\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "--short", "HEAD"], stdout="feature\n"),
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--git-path"], stdout=".git/info/exclude\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], stdout="refs/remotes/origin/trunk\n"),
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "refs/remotes/origin/trunk^{commit}"], stdout="d" * 40 + "\n"),
+        ]
+    )
+    assert Sharing(runner).plan(root, []).refs == {"refs/remotes/origin/trunk": "d" * 40}
 
 
 def test_mirror_initializes_pushes_without_hooks_then_checks_out_the_index(tmp_path: Path) -> None:

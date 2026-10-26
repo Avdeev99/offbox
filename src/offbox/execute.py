@@ -19,7 +19,7 @@ from types import FrameType
 from pydantic import Field, SecretStr, ValidationError
 
 from offbox import console
-from offbox.config import InstallConfig, Model, PortsConfig, ProjectConfig, load_config
+from offbox.config import InstallConfig, Model, PortsConfig, ProjectConfig
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError, UsageError
 from offbox.host import host_operation
 from offbox.host.ready import Clock, SystemClock
@@ -28,6 +28,7 @@ from offbox.logging import register_env_values, register_secrets
 from offbox.naming import Worktree, validate_env_name
 from offbox.paths import Paths
 from offbox.ports import PortContainer, PortManager, PortSnapshot, compose_discovery
+from offbox.project import load_project
 from offbox.providers import load_provider
 from offbox.runner import Runner, StreamProcess
 from offbox.share import Sharing, check_sharing
@@ -689,7 +690,7 @@ class Executor:
 
         runtime = Runtime(self.paths, self.runner, clock=self.clock)
         work, recorded, host = runtime.current(cwd)
-        project = load_config(work.root / "offbox.toml", ProjectConfig)
+        project = load_project(self.paths, work.root)
         install_paths(project.install.when)
         check_exec_env(self.paths, project.exec.env)
         unapproved = unapproved_exec_env(project.exec.env, recorded.approved_exec_env)

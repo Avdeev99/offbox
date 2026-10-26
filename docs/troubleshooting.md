@@ -205,13 +205,16 @@ Install commands and declared hash files are explicit configuration. A failed in
 - `Fix: Configure exec.env as environment variable names.`
 - `Fix: Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value.`
 - `Fix: Review exec.env in offbox.toml, then run offbox up to approve it.`
-- `Fix: Review files.copy and git in offbox.toml, then run offbox up to approve them.`
+- `Fix: Review files.copy and git with offbox config, then run offbox up to approve them.`
 - `Fix: Use paths below your home directory written as ~/path/to/file.`
 - `Fix: Remove SSH, GnuPG and offbox configuration files from files.copy in offbox.toml.`
 - `Fix: Create <file> or remove <entry> from files.copy in offbox.toml.`
 - `Fix: Copy large files another way.`
 - `Fix: Name refs such as origin/main in git.refs.`
-- `Fix: Check offbox status, then retry; set git.mirror = false in offbox.toml to run without git.`
+- `Fix: Check offbox status, then retry; set git.mirror = false (or OFFBOX_GIT_MIRROR=false) to run without git.`
+- `Fix: Run offbox config to list setting names and their variables.`
+- `Fix: Run offbox config to see which source sets each value.`
+- `Fix: Use [section] tables with plain TOML values in <file>.`
 - `Fix: Remove the conflicting install lock and retry.`
 - `Fix: Remove the host .offbox/install.sha256 marker and retry.`
 - `Fix: Restore an owned directory at <directory>.`

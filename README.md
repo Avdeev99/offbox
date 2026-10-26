@@ -97,7 +97,7 @@ See [limits](docs/limits.md) for the full operating model.
 
 ## Configuration and examples
 
-An `offbox.toml` at the Git worktree root configures resources, dependency installation, stack commands, forwards, sync ignores and allowed environment variables. Every key is optional. User host presets live under the XDG configuration directory. See the [complete configuration reference](docs/configuration.md).
+An `offbox.toml` at the Git worktree root configures resources, dependency installation, stack commands, forwards, sync ignores, forwarded variables, copied files and the git mirror. Every key is optional, and each can also come from your user config (for every repository), an uncommitted `offbox.local.toml` or an `OFFBOX_*` variable; `offbox config` shows the result and where each value came from. The environment gets a real Git repository by default. See the [complete configuration reference](docs/configuration.md).
 
 - [FastAPI + Postgres](examples/python-compose/): real database-backed API and tests, with ports 8000 and 5432.
 - [Vite + Playwright](examples/node-playwright/): a small web app and browser test, with port 3000.

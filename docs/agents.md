@@ -15,6 +15,10 @@ The CLI prints human diagnostics to stderr and machine-readable results to stdou
 
 A remote command can itself exit with codes 1–4. When execution and status commands are available, agents that need to distinguish an offbox failure from a command failure should run `offbox status --json` after a nonzero exit.
 
+## Configuration
+
+`offbox config --json` reports every effective project setting of the current worktree as a `settings` array of `key`, `value`, `source` (`default`, `user`, `project`, `local` or `env`) and `env`, the `OFFBOX_*` variable that overrides it, plus the three file paths under `files`. Agents can change a setting for one command without editing files, for example `OFFBOX_GIT_MIRROR=false offbox exec -- make lint`. See [how settings combine](configuration.md#how-project-settings-combine).
+
 ## Diagnostics
 
 `offbox doctor --json` emits a report with a `checks` array and exits 0 when every check passes, otherwise 3. Each check includes its name, success status, message, and an actionable fix for failure. Human diagnostics use `offbox doctor`.

@@ -17,6 +17,8 @@ MAX_COPY_BYTES = 1024 * 1024
 _BLOCKED_COPIES = (PurePosixPath(".ssh"), PurePosixPath(".config/offbox"), PurePosixPath(".gnupg"))
 _CONTAINER_HOME = PurePosixPath("/home/dev")
 _MIRROR_REF = "refs/offbox/head"
+DEFAULT_BRANCH = "origin/HEAD"
+DEFAULT_GIT_SHARING = ("HEAD", DEFAULT_BRANCH)
 
 _WRITE_FILE = r"""set -eu
 umask 077
@@ -61,8 +63,8 @@ class MirrorPlan(Model):
 
 
 def git_sharing(config: GitConfig) -> list[str]:
-    """What the git mirror sends to the environment, as the list offbox up approves."""
-    return ["HEAD", *sorted(set(config.refs))] if config.mirror else []
+    """What the git mirror sends to the environment, as the list offbox up approves; origin/HEAD is the remote's default branch."""
+    return [*DEFAULT_GIT_SHARING, *sorted(set(config.refs) - set(DEFAULT_GIT_SHARING))] if config.mirror else []
 
 
 def copy_path(entry: str) -> PurePosixPath:
@@ -91,12 +93,12 @@ def check_sharing(project: ProjectConfig, recorded: EnvState) -> None:
     for entry in project.files.copy_:
         copy_path(entry)
     files = unapproved(project.files.copy_, recorded.approved_files)
-    refs = unapproved(git_sharing(project.git), recorded.approved_git)
+    refs = unapproved(git_sharing(project.git), DEFAULT_GIT_SHARING if recorded.approved_git is None else recorded.approved_git)
     if files or refs:
         names = [*(f"files.copy {entry}" for entry in files), *(f"git {ref}" for ref in refs)]
         raise PreconditionError(
             "offbox up has not approved sharing: " + ", ".join(names),
-            "Review files.copy and git in offbox.toml, then run offbox up to approve them.",
+            "Review files.copy and git with offbox config, then run offbox up to approve them.",
         )
 
 
@@ -167,6 +169,10 @@ class Sharing:
             text = exclude.read_text() if exclude.is_file() else ""
         except OSError as exc:
             raise PreconditionError(f"Cannot read {exclude}", "Check the repository's info/exclude permissions.") from exc
+        default = self.runner.run(["git", "-C", str(root), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], check=False, timeout=30)
+        target = default.stdout.strip()
+        if default.returncode == 0 and target.startswith("refs/remotes/origin/") and target not in resolved:
+            resolved[target] = self._git(root, "rev-parse", "--verify", f"{target}^{{commit}}")
         branch = symbolic.stdout.strip() if symbolic.returncode == 0 and symbolic.stdout.strip() else None
         return MirrorPlan(head=head, branch=branch, refs=resolved, exclude=text)
 
@@ -196,7 +202,7 @@ class Sharing:
         if result.returncode:
             raise PreconditionError(
                 "Cannot mirror git history to the environment: " + (result.stderr.strip().splitlines() or ["git push failed"])[-1],
-                "Check offbox status, then retry; set git.mirror = false in offbox.toml to run without git.",
+                "Check offbox status, then retry; set git.mirror = false (or OFFBOX_GIT_MIRROR=false) to run without git.",
             )
         self._container(host, work, _CHECKOUT, [plan.head, plan.branch or ""], input=plan.exclude, timeout=120)
         logger.info("mirrored %s into %s", plan.head, work.name)

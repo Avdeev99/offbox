@@ -24,8 +24,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Help text for every CLI option, and `exec --help` shows the `-- COMMAND` form.
 - `[git] mirror` pushes `HEAD` and chosen refs into `/work/.git` so git-based tooling works in the environment, and `[files] copy` copies named home-directory files such as gcloud credentials into it; both need approval by `offbox up`.
 - Commands run by offbox see `OFFBOX_ENV` set to the environment name.
+- Project settings can also come from `[project]` tables in the user `config.toml`, an uncommitted `offbox.local.toml` and `OFFBOX_<SECTION>_<KEY>` environment variables, merged per key with later sources winning.
+- `offbox config [--json]` shows every effective project setting with its source and variable name.
 
 ### Changed
+
+- The git mirror is on by default and also mirrors the remote's default branch (`origin/HEAD`); set `git.mirror = false` to opt out. Existing environments accept the default mirror without a new `up`.
 
 - Host bootstrap waits up to 10 minutes for apt/dpkg locks, enables unattended upgrades last, and keeps installed containerd and Docker plugin versions when rerun so `host init` does not restart Docker.
 - The universal image base is pinned by digest, upgrades Ubuntu packages during the build and is rebuilt weekly without layer cache.

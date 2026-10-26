@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, ValidationError, model_validator
 
 from offbox import DEFAULT_IMAGE
 from offbox.errors import PreconditionError
@@ -28,6 +28,7 @@ class HostPreset(Model):
 class UserConfig(Model):
     default_host: str | None = None
     hosts: dict[str, HostPreset] = Field(default_factory=dict)
+    project: dict[str, dict[str, JsonValue]] = Field(default_factory=dict[str, dict[str, JsonValue]])
 
 
 class EnvConfig(Model):
@@ -91,7 +92,7 @@ class FilesConfig(Model):
 
 
 class GitConfig(Model):
-    mirror: bool = False
+    mirror: bool = True
     refs: list[str] = Field(default_factory=list)
 
 
