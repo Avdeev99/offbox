@@ -143,11 +143,43 @@ def test_missing_and_oversized_copy_sources_fail_before_any_write(tmp_path: Path
     runner = FakeRunner()
     with pytest.raises(PreconditionError, match="not a regular file") as caught:
         Sharing(runner, tmp_path).copy_files(work, host, ["~/missing"], {}, force=False)
-    assert caught.value.fix == f"Create {tmp_path / 'missing'} or remove ~/missing from files.copy in offbox.toml."
+    assert (
+        caught.value.fix == f"Create {tmp_path / 'missing'} or remove ~/missing from files.copy; offbox config shows which source sets it."
+    )
     (tmp_path / "big").write_bytes(b"x" * (MAX_COPY_BYTES + 1))
     with pytest.raises(PreconditionError, match="larger than 1 MiB"):
         Sharing(runner, tmp_path).copy_files(work, host, ["~/big"], {}, force=False)
     assert runner.calls == []
+
+
+def test_copy_refuses_symlinks_into_blocked_or_outside_directories(tmp_path: Path) -> None:
+    work, host = context(tmp_path)
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh/id_ed25519").write_text("private")
+    (tmp_path / "outside").write_text("other")
+    (home / "key").symlink_to(home / ".ssh/id_ed25519")
+    (home / "escape").symlink_to(tmp_path / "outside")
+    runner = FakeRunner()
+    for entry, target in (("~/key", home / ".ssh/id_ed25519"), ("~/escape", tmp_path / "outside")):
+        with pytest.raises(PreconditionError) as caught:
+            Sharing(runner, home).copy_files(work, host, [entry], {}, force=False)
+        assert caught.value.message == f"files.copy must not copy {entry}, which resolves to {target.resolve()}"
+    assert runner.calls == []
+
+
+def test_unknown_git_refs_name_the_entry(tmp_path: Path) -> None:
+    root = tmp_path / "app"
+    runner = FakeRunner(
+        [
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD^{commit}"], stdout="a" * 40 + "\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref"], returncode=1),
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--symbolic-full-name"], returncode=128, stderr="fatal: ambiguous\n"),
+        ]
+    )
+    with pytest.raises(PreconditionError, match="not a local branch, tag or remote-tracking ref: origin/missing$") as caught:
+        Sharing(runner).plan(root, ["origin/missing"])
+    assert caught.value.fix == "Fetch it or remove it from git.refs; offbox config shows which source sets it."
 
 
 def test_plan_resolves_head_branch_refs_and_exclude(tmp_path: Path) -> None:
@@ -158,7 +190,7 @@ def test_plan_resolves_head_branch_refs_and_exclude(tmp_path: Path) -> None:
     head, main = "a" * 40, "b" * 40
     runner = FakeRunner(
         [
-            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "HEAD^{commit}"], stdout=head + "\n"),
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD^{commit}"], stdout=head + "\n"),
             Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "--short", "HEAD"], stdout="feature/x\n"),
             Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], stdout="refs/remotes/origin/main\n"),
             Script(
@@ -191,7 +223,7 @@ def test_plan_detached_head_and_non_ref_names(tmp_path: Path) -> None:
             Script(prefix=["git", "-C", str(root), "rev-parse", "--symbolic-full-name"], stdout="\n"),
         ]
     )
-    with pytest.raises(PreconditionError, match="git.refs entry is not a branch or tag: abc123"):
+    with pytest.raises(PreconditionError, match="git.refs entry is not a local branch, tag or remote-tracking ref: abc123"):
         Sharing(runner).plan(root, ["abc123"])
 
 
@@ -200,14 +232,40 @@ def test_plan_adds_the_remote_default_branch(tmp_path: Path) -> None:
     root.mkdir()
     runner = FakeRunner(
         [
-            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "HEAD^{commit}"], stdout="a" * 40 + "\n"),
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD^{commit}"], stdout="a" * 40 + "\n"),
             Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "--short", "HEAD"], stdout="feature\n"),
             Script(prefix=["git", "-C", str(root), "rev-parse", "--git-path"], stdout=".git/info/exclude\n"),
             Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], stdout="refs/remotes/origin/trunk\n"),
-            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "refs/remotes/origin/trunk^{commit}"], stdout="d" * 40 + "\n"),
+            Script(
+                prefix=["git", "-C", str(root), "rev-parse", "--verify", "-q", "refs/remotes/origin/trunk^{commit}"], stdout="d" * 40 + "\n"
+            ),
         ]
     )
-    assert Sharing(runner).plan(root, []).refs == {"refs/remotes/origin/trunk": "d" * 40}
+    planned = Sharing(runner).plan(root, [])
+    assert planned is not None and planned.refs == {"refs/remotes/origin/trunk": "d" * 40}
+
+
+def test_plan_skips_a_default_branch_that_no_longer_exists(tmp_path: Path) -> None:
+    root = tmp_path / "app"
+    root.mkdir()
+    runner = FakeRunner(
+        [
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD^{commit}"], stdout="a" * 40 + "\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "--short", "HEAD"], stdout="feature\n"),
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--git-path"], stdout=".git/info/exclude\n"),
+            Script(prefix=["git", "-C", str(root), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], stdout="refs/remotes/origin/gone\n"),
+            Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "-q", "refs/remotes/origin/gone^{commit}"], returncode=1),
+        ]
+    )
+    planned = Sharing(runner).plan(root, [])
+    assert planned is not None and planned.refs == {}
+
+
+def test_plan_is_empty_until_the_first_commit(tmp_path: Path) -> None:
+    root = tmp_path / "app"
+    runner = FakeRunner([Script(prefix=["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD^{commit}"], returncode=1)])
+    assert Sharing(runner).plan(root, ["origin/main"]) is None
+    assert len(runner.calls) == 1
 
 
 def test_mirror_initializes_pushes_without_hooks_then_checks_out_the_index(tmp_path: Path) -> None:
@@ -238,6 +296,37 @@ def test_mirror_initializes_pushes_without_hooks_then_checks_out_the_index(tmp_p
     assert checkout.input == "x\n"
 
 
+def test_images_without_git_skip_the_mirror_with_one_warning(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    work, host = context(tmp_path)
+    plan = MirrorPlan(head="a" * 40, branch=None, refs={}, exclude="")
+    runner = FakeRunner([Script(prefix=["ssh", "offbox-main"], stdout="missing-git\n")])
+    assert Sharing(runner).mirror(work, host, plan) is False
+    assert len(runner.calls) == 1
+
+    class GitlessSharing(PlannedSharing):
+        def mirror(self, work: Worktree, host: HostState, plan: MirrorPlan) -> bool:
+            self.pushed.append(plan)
+            return False
+
+    store = store_with(tmp_path, env(work), host)
+    sharing = GitlessSharing([plan])
+    sharing.apply(store, work, host, project(mirror=True), force=False)
+    sharing.apply(store, work, host, project(mirror=True), force=False)
+    assert sharing.pushed == [plan]
+    assert capsys.readouterr().err.count("The environment image has no git, so the git mirror was skipped.") == 1
+
+
+def test_failed_checkout_names_the_git_error_and_the_opt_out(tmp_path: Path) -> None:
+    work, host = context(tmp_path)
+    runner = FakeRunner(
+        [Script(prefix=["ssh"]), Script(prefix=["git"]), Script(prefix=["ssh"], returncode=128, stderr="fatal: bad object aaaa\n")]
+    )
+    with pytest.raises(PreconditionError) as caught:
+        Sharing(runner).mirror(work, host, MirrorPlan(head="a" * 40, branch=None, refs={}, exclude=""))
+    assert caught.value.message == "Cannot check out the mirrored commit in the environment: fatal: bad object aaaa"
+    assert "OFFBOX_GIT_MIRROR=false" in (caught.value.fix or "")
+
+
 def test_failed_push_names_the_git_error_and_the_opt_out(tmp_path: Path) -> None:
     work, host = context(tmp_path)
     runner = FakeRunner(
@@ -266,8 +355,9 @@ class PlannedSharing(Sharing):
             pytest.fail("no git mirror was expected")
         return self.plans[0]
 
-    def mirror(self, work: Worktree, host: HostState, plan: MirrorPlan) -> None:
+    def mirror(self, work: Worktree, host: HostState, plan: MirrorPlan) -> bool:
         self.pushed.append(plan)
+        return True
 
 
 def test_apply_skips_an_unchanged_mirror_and_records_new_ones(tmp_path: Path) -> None:
@@ -284,6 +374,15 @@ def test_apply_skips_an_unchanged_mirror_and_records_new_ones(tmp_path: Path) ->
     sharing.apply(store, work, host, project(mirror=True), force=False)
     assert sharing.pushed == [plan, moved]
     assert store.read().envs[work.name].mirrored_git == moved.fingerprint()
+
+
+def test_apply_pushes_again_when_the_environment_lost_its_repository(tmp_path: Path) -> None:
+    work, host = context(tmp_path)
+    plan = MirrorPlan(head="a" * 40, branch=None, refs={}, exclude="")
+    store = store_with(tmp_path, env(work, mirrored_git=plan.fingerprint()), host)
+    sharing = PlannedSharing([plan])
+    sharing.apply(store, work, host, project(mirror=True), force=False, repository=False)
+    assert sharing.pushed == [plan]
 
 
 def test_apply_without_git_keeps_the_recorded_mirror(tmp_path: Path) -> None:

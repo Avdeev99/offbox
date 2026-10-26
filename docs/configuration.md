@@ -32,7 +32,7 @@ Each project setting is resolved from these sources; a later source replaces an 
 
 Values merge per key, not per section: `memory` from `offbox.local.toml` and `cpus` from `offbox.toml` both apply. A list from a later source replaces the earlier list rather than extending it, so `sync.ignore` in `offbox.local.toml` must repeat any project patterns it still wants.
 
-`offbox config` prints every effective setting of the current worktree with its source and variable name, and `offbox config --json` emits the same report for scripts:
+`offbox config` prints every effective setting of the current worktree, in the order of the [settings table](#project-settings), with its value, source and variable name. Unset values print as `unset`; for `env.cpus` and `env.memory` that means the host-derived default. `offbox config --json` emits the same report for scripts, with `null` for unset values. For example, with `OFFBOX_ENV_CPUS=6` exported and gcloud credentials in the user defaults:
 
 ```text
 Sources, later wins: default < user < project < local < env
@@ -40,11 +40,17 @@ Sources, later wins: default < user < project < local < env
   project  /home/me/src/app/offbox.toml
   local    /home/me/src/app/offbox.local.toml (not present)
 
-env.cpus      6                                                           env      OFFBOX_ENV_CPUS
-files.copy    ["~/.config/gcloud/application_default_credentials.json"]   user     OFFBOX_FILES_COPY
-git.mirror    true                                                        default  OFFBOX_GIT_MIRROR
+env.image        "ghcr.io/avdeev99/offbox-universal:1"                        default  OFFBOX_ENV_IMAGE
+env.dockerfile   unset                                                         default  OFFBOX_ENV_DOCKERFILE
+env.cpus         6.0                                                           env      OFFBOX_ENV_CPUS
+env.memory       unset                                                         default  OFFBOX_ENV_MEMORY
 ...
+files.copy       ["~/.config/gcloud/application_default_credentials.json"]    user     OFFBOX_FILES_COPY
+git.mirror       true                                                          default  OFFBOX_GIT_MIRROR
+git.refs         []                                                            default  OFFBOX_GIT_REFS
 ```
+
+`env.image` and `env.dockerfile` count as one setting for precedence: a source that sets either replaces both from earlier sources, so `OFFBOX_ENV_IMAGE` can override a project `dockerfile`.
 
 ### User defaults
 
@@ -66,7 +72,11 @@ ignore = [".agent"]
 
 Every project setting has a variable named `OFFBOX_`, the section, an underscore and the key in upper case: `git.mirror` is `OFFBOX_GIT_MIRROR`, `env.shm_size` is `OFFBOX_ENV_SHM_SIZE` and `files.copy` is `OFFBOX_FILES_COPY`. `offbox config` lists all of them.
 
-Values use TOML syntax: `true`, `4`, `"8g"` or `[".env", "dist"]`. Text that is not a TOML value is taken as a plain string, so `OFFBOX_ENV_MEMORY=8g` and `OFFBOX_INSTALL_COMMAND='uv sync --frozen'` work unquoted. For a list setting, a plain string is a one-item list: `OFFBOX_FILES_COPY=~/.config/gcloud/application_default_credentials.json`. A plain string is never split on commas, because paths and patterns can contain them; use the bracket form for several items.
+Values follow the setting's type:
+
+- Text settings (`env.image`, `env.memory`, `install.command`, `stack.up` and similar) take the value as written, without quotes: `OFFBOX_ENV_MEMORY=8g`, `OFFBOX_INSTALL_COMMAND='uv sync --frozen'`.
+- Booleans and numbers use TOML: `true`/`false`, `4`, `1.5`.
+- Lists take a TOML array, `OFFBOX_SYNC_IGNORE='[".env", "dist"]'`. A single value without brackets is a one-item list (`OFFBOX_FILES_COPY=~/.config/gcloud/application_default_credentials.json`, `OFFBOX_PORTS_FORWARD=3000`), and an empty value is an empty list, which clears the list from earlier sources. A value without brackets is never split on commas, because paths and patterns can contain them.
 
 An `OFFBOX_` variable that starts with a section name but matches no setting, such as `OFFBOX_GIT_MIRORR`, fails with `Unknown setting`. Other `OFFBOX_` names are left alone, including `OFFBOX_ENV`, which offbox sets inside environments.
 
@@ -153,7 +163,7 @@ A negated pattern re-includes only the named path; files inside a directory that
 
 `exec --env NAME=value` overrides configured names for one command. Automatic install receives these scoped values too; `up` stages receive configured `exec.env` values. TTY execution additionally forwards `TERM`, `COLORTERM` and `LANG` when set. Offbox does not forward the whole local environment. Known secret-named values are redacted from diagnostics; command stdout/stderr remain the command's own streams.
 
-Every command offbox runs in the environment sees `OFFBOX_ENV` set to the environment name, so scripts can tell they are already inside offbox.
+Commands started by `offbox exec`, the install and stack stages of `up`, and `offbox shell` see `OFFBOX_ENV` set to the environment name, so scripts can tell they are already inside offbox.
 
 ### Copied files
 
@@ -164,24 +174,28 @@ Every command offbox runs in the environment sees `OFFBOX_ENV` set to the enviro
 copy = ["~/.config/gcloud/application_default_credentials.json"]
 ```
 
-That file becomes `/home/dev/.config/gcloud/application_default_credentials.json`, where Google client libraries look for application default credentials. Rules:
+That file becomes `/home/dev/.config/gcloud/application_default_credentials.json`, readable only by `dev` (mode 0600), where Google client libraries look for application default credentials. Rules:
 
-- Only regular files under your home directory, up to 1 MiB each. Anything under `~/.ssh`, `~/.gnupg` or `~/.config/offbox` is refused.
+- Only regular files under your home directory, up to 1 MiB each. Anything under `~/.ssh`, `~/.gnupg` or `~/.config/offbox` is refused, including through a symlink: offbox resolves each entry and refuses targets in those directories or outside your home directory.
 - Copies never sync back and live in the container: `up` copies every entry, `exec` copies entries whose contents changed, `up --fresh` and `offbox rm` drop them. Removing an entry leaves its copy until then.
 - Tools that take a credential path from a variable need the environment path, not the laptop one. Set it in the project, for example `GOOGLE_APPLICATION_CREDENTIALS=/home/dev/.config/gcloud/application_default_credentials.json` in a synchronized `.env` file.
 - The user `[project]` table is a good place for personal credentials: set once, every repository gets them, and a repository's own `files.copy` replaces the list.
 
 ### Git mirror
 
-Sync never copies `.git`: a linked worktree's `.git` is only a pointer to a path on the laptop. The git mirror instead gives the environment a real repository at `/work/.git` with the laptop's commit, branch and index, so `git status`, `git diff`, `git ls-files`, changed-file test selection, `pre-commit` and version tools such as `setuptools-scm` work there. It is on by default.
+Sync never copies `.git`: a linked worktree's `.git` is only a pointer to a path on the laptop. The git mirror instead gives the environment a real repository at `/work/.git` with the laptop's commit and branch, so `git status`, `git diff`, `git ls-files`, changed-file test selection, `pre-commit` and version tools such as `setuptools-scm` work there. It is on by default.
 
 Before `up` and each `exec`, offbox:
 
-1. pushes `HEAD`, the remote's default branch (whatever `refs/remotes/origin/HEAD` points to, usually `origin/main`) and any `git.refs` over the existing SSH connection with `--no-verify`, so local hooks do not run;
-2. points the environment's branch and index at the pushed `HEAD` without changing synchronized files;
+1. force-pushes `HEAD`, the remote's default branch and any `git.refs` over the existing SSH connection with `--no-verify`, so local hooks do not run;
+2. points the environment's branch at the pushed commit (a detached `HEAD` stays detached) and resets its index to that commit without changing synchronized files;
 3. copies the repository's `info/exclude`, so ignored files stay ignored.
 
-Uncommitted changes arrive through sync and show as unstaged; staged-only state is not mirrored. The first push of a worktree sends the history reachable from those refs; later pushes send only new objects, and an `exec` whose `HEAD`, refs and excludes are unchanged pushes nothing. `exec --no-sync` skips the mirror. The environment has no `origin` remote, so commands that fetch from a Git server still need their own credentials. A shallow local clone works. To turn the mirror off, set `git.mirror = false` in any source, for example `OFFBOX_GIT_MIRROR=false` for one command or `[project.git] mirror = false` in `config.toml` for every repository.
+The default branch is the target of the local `refs/remotes/origin/HEAD`, usually `origin/main`. `git clone` creates it; for a repository set up with `git remote add`, run `git remote set-head origin --auto` once. Without it, or when it points to a branch that no longer exists, offbox mirrors `HEAD` and `git.refs` only. Only a remote named `origin` counts; list other remotes' branches in `git.refs`.
+
+Uncommitted changes arrive through sync and show as unstaged, because the index matches `HEAD`; staged-only state is not mirrored. `up` always pushes; `exec` skips the push when `HEAD`, the branch, the refs and the excludes are unchanged and `/work/.git` still exists, and pushes again otherwise. The first push of a worktree sends the history reachable from those refs, which for a large repository can take minutes (the push times out after 10 minutes); later pushes send only new objects. `exec --no-sync` skips the mirror. A repository without any commit is skipped until its first commit. A shallow local clone works. The environment has no `origin` remote, so commands that fetch from a Git server still need their own credentials.
+
+The environment image needs `git`; with an image that lacks it, offbox prints `The environment image has no git, so the git mirror was skipped.` and runs commands without a repository. To turn the mirror off, set `git.mirror = false` in any source, for example `OFFBOX_GIT_MIRROR=false` for one command or `[project.git] mirror = false` in `config.toml` for every repository.
 
 `exec.env`, `files.copy` and the mirrored refs are approved by `offbox up`; see [security](security.md#environment-variables).
 

@@ -82,7 +82,9 @@ def test_unrelated_and_marker_variables_are_ignored_but_misspelled_settings_fail
     resolve(paths, root, {"OFFBOX_ENV": "app-abcd", "OFFBOX_HARDEN": "1", "OFFBOX_VERSION": "0.1.0"})
     with pytest.raises(PreconditionError, match="Unknown setting OFFBOX_GIT_MIRORR") as caught:
         resolve(paths, root, {"OFFBOX_GIT_MIRORR": "false"})
-    assert caught.value.fix == "Run offbox config to list setting names and their variables."
+    assert (
+        caught.value.fix == "Unset OFFBOX_GIT_MIRORR; setting variables are OFFBOX_<SECTION>_<KEY> for keys in the configuration reference."
+    )
 
 
 def test_invalid_values_name_the_layer_that_set_them(tmp_path: Path) -> None:
@@ -98,13 +100,43 @@ def test_invalid_values_name_the_layer_that_set_them(tmp_path: Path) -> None:
         resolve(paths, root, {})
 
 
-def test_settings_that_conflict_only_after_merging_are_reported(tmp_path: Path) -> None:
+def test_image_and_dockerfile_are_one_setting_for_precedence(tmp_path: Path) -> None:
     paths, root = layout(tmp_path)
     paths.user_config.write_text('[project.env]\nimage = "example/image:1"\n')
     (root / "offbox.toml").write_text('[env]\ndockerfile = "Dockerfile"\n')
-    with pytest.raises(PreconditionError, match="Merged configuration is invalid") as caught:
-        resolve(paths, root, {})
-    assert caught.value.fix == "Run offbox config to see which source sets each value."
+    resolved = resolve(paths, root, {})
+    assert (resolved.config.env.image, resolved.config.env.dockerfile) == (None, Path("Dockerfile"))
+    assert (resolved.sources["env.image"], resolved.sources["env.dockerfile"]) == ("default", "project")
+    image = resolve(paths, root, {"OFFBOX_ENV_IMAGE": "example/other:2"})
+    assert (image.config.env.image, image.config.env.dockerfile) == ("example/other:2", None)
+
+
+@pytest.mark.parametrize(
+    ("name", "raw", "key", "value"),
+    [
+        ("OFFBOX_ENV_MEMORY", "4294967296", "memory", "4294967296"),
+        ("OFFBOX_INSTALL_COMMAND", "true", "command", "true"),
+        ("OFFBOX_ENV_IMAGE", "1234", "image", "1234"),
+        ("OFFBOX_PORTS_FORWARD", "3000", "forward", [3000]),
+        ("OFFBOX_SYNC_IGNORE", "2024", "ignore", ["2024"]),
+        ("OFFBOX_ENV_CPUS", "1.5", "cpus", 1.5),
+        ("OFFBOX_FILES_COPY", "", "copy", []),
+    ],
+)
+def test_env_values_follow_the_setting_type(tmp_path: Path, name: str, raw: str, key: str, value: object) -> None:
+    paths, root = layout(tmp_path)
+    dumped = resolve(paths, root, {name: raw}).config.model_dump(by_alias=True)
+    section = {"MEMORY": "env", "COMMAND": "install", "IMAGE": "env", "FORWARD": "ports", "IGNORE": "sync", "CPUS": "env", "COPY": "files"}[
+        name.rsplit("_", 1)[1]
+    ]
+    assert dumped[section][key] == value
+
+
+@pytest.mark.parametrize("raw", ["inf", "nan", "-1"])
+def test_cpu_limits_must_be_finite_and_positive(tmp_path: Path, raw: str) -> None:
+    paths, root = layout(tmp_path)
+    with pytest.raises(PreconditionError, match="env.cpus"):
+        resolve(paths, root, {"OFFBOX_ENV_CPUS": raw})
 
 
 def test_report_lists_every_setting_with_source_and_variable(tmp_path: Path) -> None:

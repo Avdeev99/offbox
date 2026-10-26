@@ -1,5 +1,6 @@
 import os
 import tomllib
+import types
 import typing
 from collections.abc import Mapping
 from pathlib import Path
@@ -17,12 +18,14 @@ Source = Literal["default", "user", "project", "local", "env"]
 type Layer = dict[str, dict[str, JsonValue]]
 _JSON = TypeAdapter[JsonValue](JsonValue)
 _LAYER = TypeAdapter[Layer](dict[str, dict[str, JsonValue]])
+_EXCLUSIVE = {"env.image": ("env.dockerfile",), "env.dockerfile": ("env.image",)}
 
 
 class SettingKey(Model):
     section: str
     field: str
     is_list: bool
+    textual: bool
 
 
 class Setting(Model):
@@ -57,7 +60,11 @@ def setting_keys() -> dict[str, SettingKey]:
             raise PreconditionError(f"Invalid project section {section}", "Report this offbox bug.")
         for name, field in model.model_fields.items():
             key = field.alias or name
-            keys[f"{section}.{key}"] = SettingKey(section=section, field=key, is_list=typing.get_origin(field.annotation) is list)
+            is_list = typing.get_origin(field.annotation) is list
+            scalar = typing.get_args(field.annotation)[0] if is_list else field.annotation
+            members = typing.get_args(scalar) if typing.get_origin(scalar) in (types.UnionType, typing.Union) else (scalar,)
+            textual = any(member in (str, Path) for member in members)
+            keys[f"{section}.{key}"] = SettingKey(section=section, field=key, is_list=is_list, textual=textual)
     return keys
 
 
@@ -111,10 +118,19 @@ def env_layer(environ: Mapping[str, str]) -> Layer:
     for name, raw in sorted(environ.items()):
         setting = names.get(name)
         if setting is not None:
-            value = parse_value(raw)
-            layer.setdefault(setting.section, {})[setting.field] = [value] if setting.is_list and isinstance(value, str) else value
+            value: JsonValue = parse_value(raw)
+            if setting.is_list and not raw.strip():
+                value = []
+            elif setting.is_list and not isinstance(value, list):
+                value = [raw if setting.textual else value]
+            elif not setting.is_list and setting.textual:
+                value = raw
+            layer.setdefault(setting.section, {})[setting.field] = value
         elif any(name.startswith(prefix) for prefix in prefixes):
-            raise PreconditionError(f"Unknown setting {name}", "Run offbox config to list setting names and their variables.")
+            raise PreconditionError(
+                f"Unknown setting {name}",
+                f"Unset {name}; setting variables are OFFBOX_<SECTION>_<KEY> for keys in the configuration reference.",
+            )
     _validate(layer, "OFFBOX_* environment variables")
     return layer
 
@@ -138,14 +154,19 @@ def resolve(paths: Paths, root: Path, environ: Mapping[str, str] | None = None) 
     for source, layer in layers:
         for section, values in layer.items():
             for key, value in values.items():
-                merged.setdefault(section, {})[key] = value
+                current = merged.setdefault(section, {})
+                for paired in _EXCLUSIVE.get(f"{section}.{key}", ()):
+                    current.pop(paired.split(".", 1)[1], None)
+                    sources[paired] = "default"
+                current[key] = value
                 sources[f"{section}.{key}"] = source
     try:
         config = ProjectConfig.model_validate(merged)
     except ValidationError as exc:
         details = "; ".join(error["msg"] for error in exc.errors(include_input=False))
         raise PreconditionError(
-            f"Merged configuration is invalid: {details}", "Run offbox config to see which source sets each value."
+            f"Merged configuration is invalid: {details}",
+            "Correct the named settings in config.toml, offbox.toml, offbox.local.toml or OFFBOX_* variables.",
         ) from exc
     return ResolvedProject(config=config, sources=sources)
 

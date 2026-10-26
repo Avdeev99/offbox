@@ -43,7 +43,10 @@ def test_exec_refuses_to_forward_provider_credentials_before_remote_work(tmp_pat
     runner = FakeRunner([Script(prefix=["git"], stdout=str(root))])
     with pytest.raises(PreconditionError, match=f"exec.env must not forward provider credentials: {variable}") as caught:
         Executor(paths, runner).execute(ExecOptions(command=["true"]), cwd=root)
-    assert caught.value.fix == "Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value."
+    assert (
+        caught.value.fix
+        == "Remove them from exec.env (offbox config shows which source sets it); pass one value with offbox exec --env NAME=value."
+    )
     assert len(runner.calls) == 1
 
 
@@ -66,7 +69,7 @@ def test_exec_refuses_exec_env_names_not_approved_by_up(tmp_path: Path, approved
     with pytest.raises(PreconditionError) as caught:
         Executor(paths, runner).execute(ExecOptions(command=["true"]), cwd=root)
     assert caught.value.message == f"exec.env forwards variables that offbox up has not approved: {missing}"
-    assert caught.value.fix == "Review exec.env in offbox.toml, then run offbox up to approve it."
+    assert caught.value.fix == "Review exec.env with offbox config, then run offbox up to approve it."
     assert len(runner.calls) == 1
 
 

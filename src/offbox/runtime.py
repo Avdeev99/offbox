@@ -677,7 +677,11 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
             raise PreconditionError("Environment is not running", "Run offbox up before opening a shell.")
         self._owned(work, container)
         return self.runner.stream(
-            ssh_argv(host.name, ["docker", "exec", "-it", "-u", "dev", "-w", "/work", work.container, "bash", "-l"], options=["-t"]),
+            ssh_argv(
+                host.name,
+                ["docker", "exec", "-it", "-u", "dev", "-w", "/work", "-e", f"OFFBOX_ENV={work.name}", work.container, "bash", "-l"],
+                options=["-t"],
+            ),
             stdin=True,
             tty=True,
         )

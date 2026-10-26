@@ -67,6 +67,7 @@ class Preflight(Model):
     install: str
     compose: str
     compose_failed: bool
+    repository: bool = True
 
 
 def parse_env(entries: Sequence[str]) -> dict[str, SecretStr]:
@@ -102,7 +103,7 @@ def check_exec_env(paths: Paths, configured: Sequence[str]) -> None:
     if blocked:
         raise PreconditionError(
             "exec.env must not forward provider credentials: " + ", ".join(blocked),
-            "Remove them from exec.env in offbox.toml; pass a value for one command with offbox exec --env NAME=value.",
+            "Remove them from exec.env (offbox config shows which source sets it); pass one value with offbox exec --env NAME=value.",
         )
 
 
@@ -344,8 +345,11 @@ $marker"
         fi
     fi
 fi
+repository=false
+[ ! -d "$work/.git" ] || repository=true
 printf '%s\n' "$inspection" | jq -c --arg install "$install" --arg compose "$compose" --argjson compose_failed "$compose_failed" \
-    '{containers: ., install: $install, compose: $compose, compose_failed: $compose_failed}'
+    --argjson repository "$repository" \
+    '{containers: ., install: $install, compose: $compose, compose_failed: $compose_failed, repository: $repository}'
 """
 )
 
@@ -697,7 +701,7 @@ class Executor:
         if unapproved:
             raise PreconditionError(
                 "exec.env forwards variables that offbox up has not approved: " + ", ".join(unapproved),
-                "Review exec.env in offbox.toml, then run offbox up to approve it.",
+                "Review exec.env with offbox config, then run offbox up to approve it.",
             )
         check_sharing(project, recorded)
         local = (cwd or Path.cwd()).resolve()
@@ -719,7 +723,9 @@ class Executor:
                 except OffboxError:
                     logger.warning("Cannot pause sync for a stopped environment", exc_info=True)
             raise PreconditionError("Environment is not running", "offbox up")
-        Sharing(self.runner).apply(runtime.store, work, host, project, force=False, git=not options.no_sync)
+        Sharing(self.runner).apply(
+            runtime.store, work, host, project, force=False, git=not options.no_sync, repository=preflight.repository
+        )
         probe = parse_install_probe(preflight.install) if project.install.command is not None else None
         self.install(work, host, project.install, env=env, probe=probe)
         snapshot = None if preflight.compose_failed else PortSnapshot(containers=preflight.containers, compose=preflight.compose)

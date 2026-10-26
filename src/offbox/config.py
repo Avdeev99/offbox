@@ -34,7 +34,7 @@ class UserConfig(Model):
 class EnvConfig(Model):
     image: str | None = None
     dockerfile: Path | None = None
-    cpus: float | None = Field(default=None, gt=0)
+    cpus: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     memory: str | None = None
     shm_size: str = "2g"
 

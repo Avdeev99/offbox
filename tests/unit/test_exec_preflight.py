@@ -102,7 +102,7 @@ def setup(root: Path, config: str = "", *, ports: dict[int, int] | None = None) 
     return paths, workroot, name
 
 
-def preflight(root: Path, name: str, *, install: str = "", compose: str = "", compose_failed: bool = False) -> str:
+def preflight(root: Path, name: str, *, install: str = "", compose: str = "", compose_failed: bool = False, repository: bool = True) -> str:
     container = {
         "Name": f"/offbox-{name}",
         "Image": "sha256:" + "f" * 64,
@@ -110,7 +110,9 @@ def preflight(root: Path, name: str, *, install: str = "", compose: str = "", co
         "Config": {"Labels": {"offbox.env": name, "offbox.worktree": str(root)}},
         "NetworkSettings": {"Networks": {"offbox": {"IPAddress": "10.89.0.2"}}},
     }
-    return json.dumps({"containers": [container], "install": install, "compose": compose, "compose_failed": compose_failed})
+    return json.dumps(
+        {"containers": [container], "install": install, "compose": compose, "compose_failed": compose_failed, "repository": repository}
+    )
 
 
 def master(pid: int = 200, *, stderr: str | None = None, returncode: int = 0) -> Script:
@@ -394,3 +396,41 @@ def test_preflight_script_stops_when_the_install_probe_cannot_enter_the_worktree
         timeout=30,
     )
     assert (result.returncode, result.stdout) == (3, "")
+
+
+@pytest.mark.parametrize(("repository", "no_sync"), [(True, False), (False, False), (False, True)])
+def test_exec_mirrors_again_when_preflight_finds_no_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repository: bool, no_sync: bool
+) -> None:
+    from offbox.config import ProjectConfig
+    from offbox.naming import Worktree
+    from offbox.share import Sharing
+    from offbox.state import StateStore
+
+    paths, root, name = setup(tmp_path, "[ports]\nauto=false\n")
+    seen: list[tuple[bool, bool]] = []
+
+    def apply(
+        self: Sharing,
+        store: StateStore,
+        work: Worktree,
+        host: HostState,
+        project: ProjectConfig,
+        *,
+        force: bool,
+        git: bool = True,
+        repository: bool = True,
+    ) -> None:
+        seen.append((git, repository))
+
+    monkeypatch.setattr(Sharing, "apply", apply)
+    runner = LockedRunner(
+        [
+            Script(prefix=["git"], stdout=str(root)),
+            Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name, repository=repository)),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream"),
+        ]
+    )
+    assert Executor(paths, runner).execute(ExecOptions(command=["true"], no_sync=True), cwd=root) == 0
+    assert seen == [(False, repository)]
+    assert PREFLIGHT_SCRIPT.count('[ ! -d "$work/.git" ] || repository=true') == 1
