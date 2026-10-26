@@ -32,16 +32,16 @@ _PASSED_THROUGH = ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "GOOGL
 _TOOLS = ("tofu", "terraform", "ssh", "git", "mutagen")
 
 
-def unit_files(home: Path, system: str | None = None) -> list[Path]:
+def unit_files(paths: Paths, home: Path, system: str | None = None) -> list[Path]:
+    """Scheduler files: a launchd agent under HOME on macOS, systemd user units beside offbox's XDG config elsewhere."""
     if (system or platform.system()) == "Darwin":
         return [home / "Library/LaunchAgents" / f"{LAUNCHD_LABEL}.plist"]
-    base = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "systemd/user"
+    base = paths.config.parent / "systemd/user"
     return [base / f"{SYSTEMD_UNIT}.service", base / f"{SYSTEMD_UNIT}.timer"]
 
 
 def installed(paths: Paths, *, home: Path | None = None, system: str | None = None) -> bool:
-    del paths
-    return all(path.is_file() for path in unit_files(home or Path.home(), system))
+    return all(path.is_file() for path in unit_files(paths, home or Path.home(), system))
 
 
 def executable_path() -> Path:
@@ -144,7 +144,7 @@ def install(
     executable = executable_path()
     environment = unit_environment(paths, os.environ if environ is None else environ, root)
     preflight(paths, environment, root)
-    files = unit_files(root, current)
+    files = unit_files(paths, root, current)
     if current == "Darwin":
         write_private(files[0], render_launchd(executable, environment, paths.logs / "reaper.log"))
         domain = f"gui/{os.getuid()}"
@@ -163,10 +163,9 @@ def install(
 
 
 def remove(paths: Paths, runner: Runner, *, home: Path | None = None, system: str | None = None) -> bool:
-    del paths
     root = home or Path.home()
     current = system or platform.system()
-    files = unit_files(root, current)
+    files = unit_files(paths, root, current)
     if not any(path.exists() for path in files):
         return False
     if current == "Darwin":
@@ -182,7 +181,7 @@ def remove(paths: Paths, runner: Runner, *, home: Path | None = None, system: st
 
 def health(paths: Paths, now: datetime, last_run: datetime | None, failure: str | None, *, home: Path | None = None) -> str | None:
     """A warning when the installed timer has stopped running or its last run failed."""
-    files = unit_files(home or Path.home())
+    files = unit_files(paths, home or Path.home())
     if not all(path.is_file() for path in files):
         return None
     if failure:
@@ -198,9 +197,9 @@ def health(paths: Paths, now: datetime, last_run: datetime | None, failure: str 
     return None
 
 
-def unit_problem(*, home: Path | None = None) -> str | None:
+def unit_problem(paths: Paths, *, home: Path | None = None, system: str | None = None) -> str | None:
     """A problem with an installed timer's target executable, such as an uninstalled offbox."""
-    files = unit_files(home or Path.home())
+    files = unit_files(paths, home or Path.home(), system)
     if not all(path.is_file() for path in files):
         return None
     try:

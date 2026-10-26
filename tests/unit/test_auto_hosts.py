@@ -430,22 +430,25 @@ def test_env_host_mismatch_message() -> None:
     )
 
 
-def test_doctor_reports_a_timer_whose_executable_is_gone(tmp_path: Path) -> None:
+@pytest.mark.parametrize("system", ["Darwin", "Linux"])
+def test_doctor_reports_a_timer_whose_executable_is_gone(tmp_path: Path, system: str) -> None:
     from offbox.host import timer
 
-    plist = timer.unit_files(tmp_path, "Darwin")[0]
-    plist.parent.mkdir(parents=True)
-    plist.write_text(timer.render_launchd(tmp_path / "gone/offbox", {"HOME": str(tmp_path)}, tmp_path / "log"))
-    if timer.unit_files(tmp_path) != [plist]:
-        for path in timer.unit_files(tmp_path):
-            path.parent.mkdir(parents=True, exist_ok=True)
-        service, unit = timer.render_systemd(tmp_path / "gone/offbox", {"HOME": str(tmp_path)})
-        timer.unit_files(tmp_path)[0].write_text(service)
-        timer.unit_files(tmp_path)[1].write_text(unit)
-    assert timer.unit_problem(home=tmp_path) == f"The idle reaper runs {tmp_path / 'gone/offbox'}, which no longer exists"
-    (tmp_path / "gone").mkdir()
-    (tmp_path / "gone/offbox").write_text("")
-    assert timer.unit_problem(home=tmp_path) is None
+    paths = paths_at(tmp_path)
+    files = timer.unit_files(paths, tmp_path, system)
+    for path in files:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    gone = tmp_path / "gone/offbox"
+    if system == "Darwin":
+        files[0].write_text(timer.render_launchd(gone, {"HOME": str(tmp_path)}, tmp_path / "log"))
+    else:
+        service, unit = timer.render_systemd(gone, {"HOME": str(tmp_path)})
+        files[0].write_text(service)
+        files[1].write_text(unit)
+    assert timer.unit_problem(paths, home=tmp_path, system=system) == f"The idle reaper runs {gone}, which no longer exists"
+    gone.parent.mkdir()
+    gone.write_text("")
+    assert timer.unit_problem(paths, home=tmp_path, system=system) is None
 
 
 def test_systemd_values_escape_specifiers() -> None:
@@ -573,7 +576,6 @@ def test_timer_install_and_remove_use_the_platform_scheduler(tmp_path: Path, mon
     executable.parent.mkdir()
     executable.write_text("")
     monkeypatch.setattr(timer, "executable_path", lambda: executable)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     calls = (
         [Script(prefix=["launchctl", "bootout"]), Script(prefix=["launchctl", "bootstrap"]), Script(prefix=["launchctl", "bootout"])]
         if system == "Darwin"
@@ -599,7 +601,7 @@ def test_timer_health_reports_failures_and_stale_runs(tmp_path: Path) -> None:
 
     paths = paths_at(tmp_path)
     assert timer.health(paths, NOW, None, None, home=tmp_path) is None
-    for path in timer.unit_files(tmp_path):
+    for path in timer.unit_files(paths, tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("unit")
     assert timer.health(paths, NOW, NOW - timedelta(minutes=10), None, home=tmp_path) is None

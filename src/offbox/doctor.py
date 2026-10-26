@@ -150,7 +150,7 @@ def diagnose(
         last_run, failure = timer_status(paths)
         warning = timer_health(paths, utc_now(), last_run, failure)
         if warning is None:
-            warning = unit_problem()
+            warning = unit_problem(paths)
         if warning is not None:
             report.checks.append(
                 Check(
