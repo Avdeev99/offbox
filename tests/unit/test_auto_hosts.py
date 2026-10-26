@@ -323,9 +323,15 @@ def test_reaped_hint_is_cleared_once_the_environment_returns(tmp_path: Path, mon
 def test_rm_destroy_is_recorded_for_later_hints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     paths = paths_at(tmp_path)
     monkeypatch.setattr(auto, "destroy_host_locked", recorded_destroy(paths, []))
-    write_state(paths, [host()], [env("gone-abcd", tmp_path / "removed")])
+    write_state(
+        paths,
+        [host("old", created=NOW - timedelta(days=1)), host()],
+        [env("old-abcd", tmp_path, "old", created=NOW - timedelta(days=1)), env("gone-abcd", tmp_path / "removed")],
+    )
+    reap(paths, FakeRunner(), "old", now=lambda: NOW, clock=FakeClock())
     assert release_if_unused(paths, FakeRunner(), "agg", clock=FakeClock()) is True
     assert "(last environment removed)" in (lost_environment_hint(paths, "gone-abcd") or "")
+    assert "host old was reaped" in (lost_environment_hint(paths, "old-abcd") or "")
 
 
 def forgettable_host(paths: Paths, *, interrupted: bool = False) -> HostState:

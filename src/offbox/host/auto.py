@@ -226,12 +226,10 @@ def release_if_unused(
                 return False
             console.step(f"Destroying auto-managed host {name}: its last environment was removed")
             lost = _destroy(paths, runner, host, executable=executable)
-            _record(
-                paths,
-                ReapReport(hosts=[ReapOutcome(name=name, action="destroyed", reason="last environment removed", lost_environments=lost)]),
-                "manual",
-                utc_now(),
-            )
+            previous = read_history(paths).manual
+            earlier = [outcome for outcome in previous.report.hosts if outcome.name != name] if previous is not None else []
+            outcome = ReapOutcome(name=name, action="destroyed", reason="last environment removed", lost_environments=lost)
+            _record(paths, ReapReport(hosts=[*earlier, outcome]), "manual", utc_now())
             return True
 
 
