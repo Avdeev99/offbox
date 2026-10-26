@@ -38,6 +38,13 @@ ignore = [".env", "large-fixtures/"]
 
 [exec]
 env = ["CI", "NPM_TOKEN"]
+
+[files]
+copy = ["~/.config/gcloud/application_default_credentials.json"]
+
+[git]
+mirror = true
+refs = ["origin/main"]
 ```
 
 | Key | Default | Behavior |
@@ -55,12 +62,15 @@ env = ["CI", "NPM_TOKEN"]
 | `ports.auto` | `true` | Add published TCP ports from a root Compose stack; deduplicate IPv4/IPv6 entries. |
 | `sync.ignore` | `[]` additional patterns | Add Mutagen ignore patterns; each value remains one pattern, including commas/quotes. Mandatory Git exclusion is applied last. |
 | `exec.env` | `[]` | Names copied from the local environment when set; values are not stored in state. |
+| `files.copy` | `[]` | Local files written as `~/path` that are copied to the same path under the environment's home (`/home/dev`). They never sync back. Each must be a regular file of at most 1 MiB outside `~/.ssh`, `~/.gnupg` and `~/.config/offbox`. |
+| `git.mirror` | `false` | Pushes `HEAD` into `/work/.git` before commands, so `git status`, `git diff` and `git ls-files` in the environment match the laptop. |
+| `git.refs` | `[]` | Extra refs pushed with the mirror under their full names, for example `origin/main` as `refs/remotes/origin/main`. |
 
 The default image has one definition, `DEFAULT_IMAGE` in [offbox/__init__.py](../src/offbox/__init__.py). Custom images must preserve the ready-file, `dev` user, Docker and `offbox-run` contracts; see [the universal image](universal-image.md).
 
 Recognized root Compose filenames are `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml`. Automatic setup runs only `mise install` when `.tool-versions` or `mise.toml` exists, the declared install command, and the declared/default stack command. `up --no-stack` skips stack startup. There is no additional project detection.
 
-`up` explicitly runs the install stage. Later `exec` calls rerun it only when its stored ordered hash changes. The marker lives outside source at `/srv/offbox/envs/<env>/.offbox/install.sha256`; see [the hash and coordination contract](agents.md#dependency-installation). `exec --no-sync` uses the already-synced remote files without a hidden flush.
+`up` explicitly runs the install stage. Later `exec` calls rerun it when the stored hash of the `when` files or the install command itself changes. The marker lives outside source at `/srv/offbox/envs/<env>/.offbox/install.sha256`; see [the hash and coordination contract](agents.md#dependency-installation). `exec --no-sync` uses the already-synced remote files without a hidden flush.
 
 A custom Dockerfile image is cached by project-path and Dockerfile-content hashes. Other build-context changes alone do not invalidate this cache. An existing container retains its image until `up --fresh`; that command replaces its Docker data volume while keeping synchronized code, so it asks for confirmation on a terminal and needs `--yes` otherwise.
 
@@ -80,6 +90,16 @@ A negated pattern re-includes only the named path; files inside a directory that
 `.gitignore` is not a secret filter. Add `.env` or other sensitive paths explicitly to `sync.ignore` when they must stay local. Files created remotely, such as lockfiles and formatter output, sync back under two-way-safe conflict handling.
 
 `exec --env NAME=value` overrides configured names. Automatic install receives these scoped values too; `up` stages receive configured `exec.env` values. TTY execution additionally forwards `TERM`, `COLORTERM` and `LANG` when set. Offbox does not forward the whole local environment. Known secret-named values are redacted from diagnostics; command stdout/stderr remain the command's own streams.
+
+### Files and git history
+
+`files.copy` and `git` send local data that sync does not carry. `files.copy` suits credentials a test suite reads from a fixed path, such as gcloud application default credentials; the copy lives in the container and disappears with `offbox rm`. `up` copies every entry; `exec` copies only entries whose contents changed. Removing an entry leaves the existing copy in place until `offbox rm`.
+
+`git.mirror` gives tools that need a real repository (changed-file selection, `git ls-files`, builds from `git archive`) the same commit, branch and index as the laptop. Offbox pushes over the existing SSH connection with `--no-verify`, so local hooks do not run, into `/work/.git`, which sync never touches. It then resets the environment's index to `HEAD` without changing synced files, and copies the repository's `info/exclude`. Uncommitted changes arrive through sync and show as unstaged; staged-only state is not mirrored. The first push of a worktree sends its full history; later pushes send only new objects, and an `exec` whose `HEAD`, refs and excludes are unchanged pushes nothing. The environment has no `origin` remote, so commands that fetch from GitHub still need their own credentials. A shallow local clone works because the environment accepts shallow updates. `exec --no-sync` skips the mirror.
+
+Both settings are approved by `offbox up` like `exec.env`; see [security](security.md#environment-variables).
+
+Every command offbox runs in the environment sees `OFFBOX_ENV` set to the environment name, so scripts can tell they are already inside offbox.
 
 ## User host presets
 

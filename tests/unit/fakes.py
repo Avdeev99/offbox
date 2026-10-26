@@ -22,6 +22,7 @@ class Call(BaseModel):
     interruptible: bool = False
     stdin: bool = False
     tty: bool = False
+    keepalive: bool = False
 
 
 class Script(BaseModel):
@@ -117,9 +118,23 @@ class FakeRunner:
         ).returncode
 
     def start_stream(
-        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        stdin: bool = False,
+        tty: bool = False,
+        keepalive: bool = False,
     ) -> StreamProcess:
-        call = Call(method="start_stream", argv=list(argv), capture=False, env=dict(env) if env is not None else None, stdin=stdin, tty=tty)
+        call = Call(
+            method="start_stream",
+            argv=list(argv),
+            capture=False,
+            env=dict(env) if env is not None else None,
+            stdin=stdin,
+            tty=tty,
+            keepalive=keepalive,
+        )
         script = self._script(call)
         process = FakeStreamProcess(script.returncode, script.stream_results)
         self.processes.append(process)

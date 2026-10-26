@@ -9,11 +9,11 @@ import pytest
 from fakes import FakeRunner, Script
 from test_runtime import FakeClock, container_json, runtime_setup, sync_ready_scripts
 
-from offbox.config import EnvConfig
+from offbox.config import EnvConfig, ProjectConfig
 from offbox.errors import CommandFailed, PreconditionError
 from offbox.naming import Worktree, worktree_name
 from offbox.runtime import SETTINGS_LABEL, Runtime, container_command, settings_digest, with_settings_label
-from offbox.state import EnvState, StateStore
+from offbox.state import EnvState, HostState, StateStore
 
 
 def labelled(root: Path, name: str, settings: str | None) -> str:
@@ -109,6 +109,38 @@ def test_up_approves_exec_env_and_warns_about_new_names(
         assert "Forwarding new local variables" not in error
     else:
         assert f"Forwarding new local variables to the environment: {warning}" in error
+
+
+@pytest.mark.parametrize(("previous", "warned"), [(None, False), ([], True)])
+def test_up_approves_and_forces_sharing_before_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], previous: list[str] | None, warned: bool
+) -> None:
+    from offbox.share import Sharing
+
+    paths, _host, root = runtime_setup(tmp_path)
+    name = worktree_name(root)
+    (root / "offbox.toml").write_text('[files]\ncopy=["~/token"]\n[git]\nmirror=true\nrefs=["origin/main"]\n')
+    with StateStore(paths.state).transaction() as state:
+        state.envs[name] = EnvState(
+            name=name, host="main", worktree_path=root, created_at=datetime.now(UTC), approved_files=previous, approved_git=previous
+        )
+    applied: list[bool] = []
+
+    def apply(
+        self: Sharing, store: StateStore, work: Worktree, host: HostState, project: ProjectConfig, *, force: bool, git: bool = True
+    ) -> None:
+        applied.append(force)
+
+    monkeypatch.setattr(Sharing, "apply", apply)
+    runner = up_runner(root, name, labelled(root, name, expected_settings(root, name)))
+    Runtime(paths, runner, FakeClock()).up(cwd=root)
+    recorded = StateStore(paths.state).read().envs[name]
+    assert applied == [True]
+    assert recorded.approved_files == ["~/token"]
+    assert recorded.approved_git == ["HEAD", "origin/main"]
+    error = " ".join(capsys.readouterr().err.split())
+    assert ("Copying new local files to the environment: ~/token" in error) is warned
+    assert ("Mirroring new git refs to the environment: HEAD, origin/main" in error) is warned
 
 
 def test_up_refuses_credential_variables_in_exec_env_before_remote_work(tmp_path: Path) -> None:

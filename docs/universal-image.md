@@ -28,7 +28,7 @@ Direct Node, Go, uv, Bun, mise and rustup artifacts have embedded SHA256 checksu
 
 `offbox-run [--tty] ID CWD -- ARGV...` executes as `dev`. Non-TTY commands start in a new session/process group; TTY commands keep their controlling terminal. Both inherit stdin explicitly and reset ignored interrupt/termination/hangup signals before executing the requested command. The command runs with umask `022`; the wrapper keeps `077` only for its own state files. The wrapper waits for completion and records the child PID, process start time and actual exit code under `/run/offbox/exec/`. Signal exits retain the shell's `128 + signal` status.
 
-`offbox-run --signal INT|TERM|KILL ID` targets a non-TTY process group after checking its recorded start time and current group identity. Completed runs are harmless to signal again. TTY commands use terminal controls; the external helper refuses to signal their shared terminal group. Completed records and orphaned metadata older than one day are cleaned on new runs; valid active records are retained.
+`offbox-run --signal INT|TERM|KILL ID` targets a non-TTY process group after checking its recorded start time and current group identity. It signals with `kill -SIGNAL -- -PGID`, the form procps-ng accepts for process groups. Completed runs are harmless to signal again. TTY commands use terminal controls; the external helper refuses to signal their shared terminal group. Completed records and orphaned metadata older than one day are cleaned on new runs; valid active records are retained.
 
 ## Build and publication
 

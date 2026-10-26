@@ -37,7 +37,7 @@ if [ "${1:-}" = --signal ]; then
     [ "$pid" -gt 1 ] || fail 'Unsafe process group.' 'Check the run status before retrying.'
     actual=$(process_info "$pid")
     [ "$actual" = "$pid $started" ] || fail 'Run process group no longer matches its recorded identity.' 'Check the run status; do not signal a reused PID.'
-    /bin/kill -s "$signal" -- "-$pid"
+    /bin/kill -"$signal" -- "-$pid"
     exit 0
 fi
 
@@ -91,7 +91,7 @@ forward_signal() {
             [ "$1" != INT ] || return 0
             /bin/kill -s "$1" "$child_pid" 2>/dev/null || :
         else
-            /bin/kill -s "$1" -- "-$child_pid" 2>/dev/null || /bin/kill -s "$1" "$child_pid" 2>/dev/null || :
+            /bin/kill -"$1" -- "-$child_pid" 2>/dev/null || /bin/kill -s "$1" "$child_pid" 2>/dev/null || :
         fi
     fi
 }

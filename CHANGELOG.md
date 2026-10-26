@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `host destroy --forget` removes the local record of an unreachable existing-SSH host.
 - `exec.env` names are approved by `offbox up`; `exec` refuses names that changed since and refuses provider credential variables.
 - Help text for every CLI option, and `exec --help` shows the `-- COMMAND` form.
+- `[git] mirror` pushes `HEAD` and chosen refs into `/work/.git` so git-based tooling works in the environment, and `[files] copy` copies named home-directory files such as gcloud credentials into it; both need approval by `offbox up`.
+- Commands run by offbox see `OFFBOX_ENV` set to the environment name.
 
 ### Changed
 
@@ -37,6 +39,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - State and cache directories are private (0700), and the previous state file is kept as `state.json.bak`.
 
 ### Fixed
+
+- Ctrl-C, SIGTERM and SIGHUP relay into remote process groups works again: `offbox-run` used a `kill -s NAME -- -PGID` form that the image's procps-ng rejects.
+- A non-TTY `offbox exec` killed without a chance to relay (SIGKILL, lost network) no longer leaves its remote command running.
+- Changing `install.command` reinstalls dependencies on the next `exec`, not only changes to the `install.when` files.
 
 - Interrupting provisioning no longer kills OpenTofu mid-apply; Ctrl-C after a VM exists prints the `host destroy` command and exits 130.
 - An unreadable state file reports the backup and the manual `tofu destroy` commands for each provider workspace.

@@ -1,5 +1,6 @@
 import contextvars
 import fcntl
+import hashlib
 import logging
 import os
 import re
@@ -29,6 +30,7 @@ from offbox.paths import Paths
 from offbox.ports import PortContainer, PortManager, PortSnapshot, compose_discovery
 from offbox.providers import load_provider
 from offbox.runner import Runner, StreamProcess
+from offbox.share import Sharing, check_sharing
 from offbox.ssh import ssh_argv
 from offbox.state import HostState
 from offbox.timings import measured, stage
@@ -146,11 +148,15 @@ def command_argv(
         if _ENV_NAME.fullmatch(name) is None or "\0" in value:
             raise UsageError("Invalid execution environment", "Use valid environment variable names and values.")
         remote.extend(["-e", f"{name}={value}"])
+    remote.extend(["-e", f"OFFBOX_ENV={work.name}"])
     remote.extend([work.container, "offbox-run", *(["--tty"] if tty else []), run_id, directory, "--", *command])
-    if diagnostics:
-        remote = ["sh", "-c", "exec " + shlex.join(remote) + " >&2"]
-    options = ["-tt" if force_pty else "-t"] if tty else ([] if stdin else ["-n"])
-    return ssh_argv(host.name, remote, options=options)
+    if tty:
+        return ssh_argv(host.name, remote, options=["-tt" if force_pty else "-t"])
+    if stdin:
+        if diagnostics:
+            remote = ["sh", "-c", "exec " + shlex.join(remote) + " >&2"]
+        return ssh_argv(host.name, remote)
+    return ssh_argv(host.name, ["bash", "-c", WATCH_SCRIPT, "offbox-watch", work.container, run_id, "1" if diagnostics else "0", *remote])
 
 
 class SignalState:
@@ -163,6 +169,57 @@ class SignalState:
         if self.number is None:
             self.number = number
             self.received_at = self.clock.now()
+
+
+WATCH_SCRIPT = r"""set -u
+container=$1
+run_id=$2
+diagnostics=$3
+shift 3
+stop() {
+    sent=
+    attempt=0
+    while [ "$attempt" -lt 60 ]; do
+        state=$(docker exec "$container" sh -c 'if [ -f "$1.code" ]; then echo done; elif [ -f "$1.pid" ]; then echo running; else echo pending; fi' \
+            sh "/run/offbox/exec/$run_id" 2>/dev/null) || return 0
+        case "$state" in
+            done) return 0 ;;
+            pending) kill -0 "$child" 2>/dev/null || return 0 ;;
+            *)
+                if [ -z "$sent" ]; then
+                    docker exec "$container" offbox-run --signal TERM "$run_id" >/dev/null 2>&1 && sent=TERM
+                elif [ "$sent" = TERM ] && [ "$attempt" -ge 50 ]; then
+                    docker exec "$container" offbox-run --signal KILL "$run_id" >/dev/null 2>&1 && sent=KILL
+                fi
+                ;;
+        esac
+        sleep 0.2
+        attempt=$((attempt + 1))
+    done
+}
+exec 3<&0
+if [ "$diagnostics" = 1 ]; then
+    "$@" </dev/null 3<&- >&2 &
+else
+    "$@" </dev/null 3<&- &
+fi
+child=$!
+cat <&3 >/dev/null 2>&1 3<&- &
+reader=$!
+exec 3<&-
+done_pid=
+wait -n -p done_pid "$child" "$reader"
+status=$?
+if [ "$done_pid" = "$child" ]; then
+    kill "$reader" 2>/dev/null
+    wait "$reader" 2>/dev/null
+    [ "$status" = 0 ] || stop
+    exit "$status"
+fi
+stop
+wait "$child"
+"""
+"""Run the docker exec client on the host and stop the remote run once the local client's stdin pipe closes."""
 
 
 @contextmanager
@@ -303,6 +360,11 @@ def parse_install_probe(text: str) -> InstallProbe:
         raise PreconditionError("Invalid installation marker", "Remove the host .offbox/install.sha256 marker and retry.") from exc
 
 
+def install_marker(files_digest: str, command: str) -> str:
+    """The marker value for an install: the install.when digest bound to the command that produced it."""
+    return hashlib.sha256(f"{files_digest}\n{command}\n".encode()).hexdigest()
+
+
 def install_paths(names: Sequence[str]) -> list[str]:
     for name in names:
         path = PurePosixPath(name)
@@ -410,7 +472,7 @@ class Executor:
         else:
             state = SignalState(self.clock)
             with capture_signals(state):
-                process = self.runner.start_stream(argv, stdin=stdin)
+                process = self.runner.start_stream(argv, stdin=stdin, keepalive=not stdin)
                 try:
                     if started is not None:
                         started()
@@ -526,18 +588,19 @@ class Executor:
         if config.command is None:
             return
         install_paths(config.when)
+        command = config.command
         if not always:
             current = probe or self.install_probe(work, host, config.when)
-            if current.marker == current.digest:
+            if current.marker == install_marker(current.digest, command):
                 return
         with self.installation_lock(work, wait=wait) as waited:
             if waited and not always:
                 current = self.install_probe(work, host, config.when)
-                if current.marker == current.digest:
+                if current.marker == install_marker(current.digest, command):
                     return
-            console.step("Installing dependencies" if always else "lockfile changed, running install")
-            self._stage(work, host, config.command, env=env)
-            digest = self.install_hash(work, host, config.when)
+            console.step("Installing dependencies" if always else "install inputs changed, running install")
+            self._stage(work, host, command, env=env)
+            digest = install_marker(self.install_hash(work, host, config.when), command)
             self._remote(host, ["sh", "-s", "--", work.directory, digest], input=_MARKER_WRITE)
 
     def up_stages(self, work: Worktree, host: HostState, project: ProjectConfig, *, no_stack: bool = False) -> None:
@@ -635,6 +698,7 @@ class Executor:
                 "exec.env forwards variables that offbox up has not approved: " + ", ".join(unapproved),
                 "Review exec.env in offbox.toml, then run offbox up to approve it.",
             )
+        check_sharing(project, recorded)
         local = (cwd or Path.cwd()).resolve()
         try:
             relative = local.relative_to(work.root)
@@ -654,6 +718,7 @@ class Executor:
                 except OffboxError:
                     logger.warning("Cannot pause sync for a stopped environment", exc_info=True)
             raise PreconditionError("Environment is not running", "offbox up")
+        Sharing(self.runner).apply(runtime.store, work, host, project, force=False, git=not options.no_sync)
         probe = parse_install_probe(preflight.install) if project.install.command is not None else None
         self.install(work, host, project.install, env=env, probe=probe)
         snapshot = None if preflight.compose_failed else PortSnapshot(containers=preflight.containers, compose=preflight.compose)

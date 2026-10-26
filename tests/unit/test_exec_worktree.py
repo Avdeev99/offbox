@@ -52,7 +52,7 @@ def preflight(root: Path, name: str, *, running: bool = True, install: str = "",
 
 @pytest.mark.parametrize(
     ("tty", "local_tty", "expected"),
-    [(None, False, "-n"), (None, True, "-t"), (True, False, "-tt"), (True, True, "-t"), (False, True, "-n")],
+    [(None, False, "--"), (None, True, "-t"), (True, False, "-tt"), (True, True, "-t"), (False, True, "--")],
 )
 def test_exec_maps_nested_cwd_uses_recorded_host_and_scoped_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tty: bool | None, local_tty: bool, expected: str
@@ -73,13 +73,16 @@ def test_exec_maps_nested_cwd_uses_recorded_host_and_scoped_env(
             Script(prefix=["git"], stdout=str(root)),
             Script(prefix=["ssh", "offbox-recorded"], stdout=preflight(root, name)),
             Script(
-                prefix=["ssh", expected, "offbox-recorded"], method="stream" if expected in ("-t", "-tt") else "start_stream", returncode=42
+                prefix=["ssh", "offbox-recorded", "--"] if expected == "--" else ["ssh", expected, "offbox-recorded"],
+                method="stream" if expected in ("-t", "-tt") else "start_stream",
+                returncode=42,
             ),
         ]
     )
     assert Executor(paths, runner).execute(ExecOptions(command=["pytest", "-q"], no_sync=True, tty=tty), cwd=nested) == 42
     assert "'/work/nested dir'" in runner.calls[-1].argv[-1]
     assert "-e CI=1" in runner.calls[-1].argv[-1]
+    assert runner.calls[-1].keepalive is (expected == "--")
     assert all(call.argv[0] != "mutagen" for call in runner.calls)
 
 
@@ -167,9 +170,15 @@ def test_run_relays_signals_received_while_waiting_and_restores_handlers(
 
     class SignalRunner(FakeRunner):
         def start_stream(
-            self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+            self,
+            argv: Sequence[str],
+            *,
+            env: Mapping[str, str] | None = None,
+            stdin: bool = False,
+            tty: bool = False,
+            keepalive: bool = False,
         ) -> StreamProcess:
-            super().start_stream(argv, env=env, stdin=stdin, tty=tty)
+            super().start_stream(argv, env=env, stdin=stdin, tty=tty, keepalive=keepalive)
             return SignalledProcess(0, [None])
 
     def relay(self: Executor, process: object, state: SignalState, target: HostState, work: Worktree, run_id: str) -> int:
@@ -213,11 +222,17 @@ def test_exec_restores_ports_concurrently_after_starting_the_user_command(tmp_pa
 
     class ObservedRunner(FakeRunner):
         def start_stream(
-            self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+            self,
+            argv: Sequence[str],
+            *,
+            env: Mapping[str, str] | None = None,
+            stdin: bool = False,
+            tty: bool = False,
+            keepalive: bool = False,
         ) -> StreamProcess:
             with host_operation(paths, "recorded"):
                 events.append("user")
-            return super().start_stream(argv, env=env, stdin=stdin, tty=tty)
+            return super().start_stream(argv, env=env, stdin=stdin, tty=tty, keepalive=keepalive)
 
     runner = ObservedRunner(
         [

@@ -362,6 +362,7 @@ class Runtime:
 
     def up(self, *, cwd: Path | None = None, host_name: str | None = None, fresh: bool = False, no_stack: bool = False) -> EnvState:
         from offbox.execute import Executor, check_exec_env, execution_env, install_paths, unapproved_exec_env
+        from offbox.share import Sharing, git_sharing, sharing_additions
 
         work = find_worktree(self.runner, cwd)
         project = load_config(work.root / "offbox.toml", ProjectConfig)
@@ -395,9 +396,12 @@ class Runtime:
                     raise PreconditionError("Environment or host changed while preparing up", "Retry offbox up.")
                 env = previous or EnvState(name=work.name, host=host.name, worktree_path=work.root, created_at=datetime.now(UTC))
                 added = [] if env.approved_exec_env is None else unapproved_exec_env(project.exec.env, env.approved_exec_env)
+                shared = sharing_additions(project, env)
                 state.envs[env.name] = env
             if added:
                 console.warn("Forwarding new local variables to the environment: " + ", ".join(added))
+            for message in shared:
+                console.warn(message)
             self.mutate(host, work, "prepare")
             self.sync.ensure(work, host, project.sync)
             built: BuiltImage | None = None
@@ -418,6 +422,7 @@ class Runtime:
             if fresh:
                 self.sync.ensure(work, host, project.sync)
             self.sync.flush(work, host)
+            Sharing(self.runner).apply(self.store, work, host, project, force=True)
             Executor(self.paths, self.runner, clock=self.clock).up_stages(work, host, project, no_stack=no_stack)
             ports = self.ports.restore(work, host, project.ports)
             for forward in ports.forwards:
@@ -435,6 +440,8 @@ class Runtime:
                     raise PreconditionError("Environment registration changed", "Run offbox list before retrying.")
                 current.image_digest = env.image_digest
                 current.approved_exec_env = sorted(set(project.exec.env))
+                current.approved_files = sorted(set(project.files.copy_))
+                current.approved_git = git_sharing(project.git)
                 env = current
         console.success(f"Environment {env.name} ready on {host.name}")
         return env

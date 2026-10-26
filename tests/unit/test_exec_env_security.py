@@ -86,7 +86,7 @@ def test_removing_names_from_exec_env_needs_no_new_approval(tmp_path: Path) -> N
                 prefix=["ssh", "offbox-main"],
                 stdout=json.dumps({"containers": [container], "install": "", "compose": "", "compose_failed": False}),
             ),
-            Script(prefix=["ssh", "-n"], method="start_stream"),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream"),
         ]
     )
     assert Executor(paths, runner).execute(ExecOptions(command=["true"], no_sync=True), cwd=root) == 0
@@ -121,3 +121,13 @@ def test_short_forwarded_values_are_redacted_only_as_assignments() -> None:
 def test_secret_named_and_long_forwarded_values_are_redacted_anywhere() -> None:
     parse_env(["API_TOKEN=short-k42", "SERVICE_URL=https://long-value.test/k42"])
     assert redact("short-k42 https://long-value.test/k42", {}) == "[REDACTED] [REDACTED]"
+
+
+def test_exec_refuses_unapproved_file_copies_and_git_mirror_before_remote_work(tmp_path: Path) -> None:
+    paths, root, _name = setup(tmp_path, [], [])
+    (root / "offbox.toml").write_text('[files]\ncopy=["~/.config/gcloud/adc.json"]\n[git]\nmirror=true\n')
+    runner = FakeRunner([Script(prefix=["git"], stdout=str(root))])
+    with pytest.raises(PreconditionError) as caught:
+        Executor(paths, runner).execute(ExecOptions(command=["true"]), cwd=root)
+    assert caught.value.message == "offbox up has not approved sharing: files.copy ~/.config/gcloud/adc.json, git HEAD"
+    assert len(runner.calls) == 1
