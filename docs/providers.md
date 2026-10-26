@@ -59,7 +59,7 @@ The shared network is `10.89.0.0/16`; an existing network named `offbox` with a 
 
 ## Name collisions
 
-A host named `NAME` creates cloud resources named `offbox-NAME` (server, firewall, and on Google Cloud network and firewall rules). If they already exist in the provider project, creation fails with `Cloud resources named offbox-NAME already exist in the provider project` instead of adopting them. Delete them in the provider console or choose another host name, then run `offbox host destroy NAME` to clear the local record.
+A host named `NAME` creates cloud resources named after `offbox-NAME`: on Hetzner the server and firewall; on Google Cloud the instance, network, subnetwork and the `offbox-NAME-ssh` firewall rule. If they already exist in the provider project, creation fails with `Cloud resources named offbox-NAME already exist in the provider project` instead of adopting them. Delete them in the provider console or choose another host name, then run `offbox host destroy NAME` to clear the local record.
 
 ## Provider workspaces and recovery
 

@@ -57,16 +57,6 @@ class ReapHistory(Model):
     manual: ReapRecord | None = None
 
 
-class HostWarning(Model):
-    host: str
-    message: str
-    created_at: datetime
-
-
-class HostWarnings(Model):
-    warnings: list[HostWarning] = Field(default_factory=list[HostWarning])
-
-
 class Decision(Model):
     destroy: bool
     reason: str
@@ -74,10 +64,6 @@ class Decision(Model):
 
 def _record_path(paths: Paths) -> Path:
     return paths.state / "reap.json"
-
-
-def _warnings_path(paths: Paths) -> Path:
-    return paths.state / "warnings.json"
 
 
 def read_history(paths: Paths) -> ReapHistory:
@@ -97,29 +83,6 @@ def timer_status(paths: Paths) -> tuple[datetime | None, str | None]:
         return None, None
     failed = next((outcome for outcome in record.report.hosts if outcome.action == "failed"), None)
     return record.finished_at, None if failed is None else f"{failed.name}: {failed.error}"
-
-
-def read_warnings(paths: Paths) -> list[HostWarning]:
-    try:
-        return HostWarnings.model_validate_json(_warnings_path(paths).read_text()).warnings
-    except FileNotFoundError:
-        return []
-    except (OSError, ValidationError):
-        logger.warning("ignoring unreadable host warnings", exc_info=True)
-        return []
-
-
-def _write_warnings(paths: Paths, warnings: list[HostWarning]) -> None:
-    write_private(_warnings_path(paths), HostWarnings(warnings=warnings).model_dump_json(indent=2) + "\n")
-
-
-def dismiss_warning(paths: Paths, name: str) -> bool:
-    current = read_warnings(paths)
-    kept = [warning for warning in current if warning.host != name]
-    if len(kept) == len(current):
-        return False
-    _write_warnings(paths, kept)
-    return True
 
 
 def lost_environment_hint(paths: Paths, env: str) -> str | None:
@@ -145,10 +108,12 @@ def host_activity(paths: Paths, state: State, host: HostState) -> datetime:
     return max([host.created_at, *(last_activity(paths, env) for env in state.envs.values() if env.host == host.name)])
 
 
-def reap_decision(host: HostState, activity: datetime, now: datetime, *, operation_free: bool) -> Decision:
-    """Whether an idle or abandoned auto-managed host should be destroyed now; running commands are guarded by the usage lock."""
+def reap_decision(host: HostState, activity: datetime, now: datetime, *, operation_free: bool, empty: bool = False) -> Decision:
+    """Whether an idle, empty or abandoned auto-managed host should be destroyed now; running commands are guarded by the usage lock."""
     if not host.auto:
         return Decision(destroy=False, reason="manual host")
+    if host.phase == "ready" and empty:
+        return Decision(destroy=True, reason="no environments use it")
     if host.phase != "ready":
         if not operation_free:
             return Decision(destroy=False, reason="creation in progress")
@@ -169,16 +134,6 @@ def _destroy(paths: Paths, runner: Runner, host: HostState, *, executable: Path 
     destroy_host_locked(paths, runner, host.name, executable=executable)
     for name in lost:
         forget(paths, name)
-    if host.create_interrupted:
-        warnings = [warning for warning in read_warnings(paths) if warning.host != host.name]
-        warnings.append(
-            HostWarning(
-                host=host.name,
-                message=f"Creation of {host.name} was interrupted; check the provider console for resources labelled offbox-host={host.name}",
-                created_at=utc_now(),
-            )
-        )
-        _write_warnings(paths, warnings)
     return lost
 
 
@@ -216,8 +171,15 @@ def ensure_host(
             else "destroyed when its last environment is removed"
         )
         console.warn(f"Creating auto-managed host {name}: billable until destroyed; {limit}")
-        if idle and timer_installed is not None and not timer_installed(paths):
-            console.info("Idle reaping needs the timer: offbox host reap --install-timer")
+        if idle and timer_installed is not None:
+            if not timer_installed(paths):
+                console.info("Idle reaping needs the timer: offbox host reap --install-timer")
+            else:
+                from offbox.host.timer import check_installed_credentials
+
+                problem = check_installed_credentials(paths)
+                if problem is not None:
+                    console.warn(f"The idle reaper cannot destroy {name}: {problem}")
         from offbox.host.create import CreateOptions, create_host_locked
 
         return create_host_locked(
@@ -263,7 +225,13 @@ def release_if_unused(
             if any(env.host == name and not worktree_gone(env.worktree_path) for env in state.envs.values()):
                 return False
             console.step(f"Destroying auto-managed host {name}: its last environment was removed")
-            _destroy(paths, runner, host, executable=executable)
+            lost = _destroy(paths, runner, host, executable=executable)
+            _record(
+                paths,
+                ReapReport(hosts=[ReapOutcome(name=name, action="destroyed", reason="last environment removed", lost_environments=lost)]),
+                "manual",
+                utc_now(),
+            )
             return True
 
 
@@ -296,11 +264,28 @@ def reap(
             logger.exception("reaping %s failed", current)
             report.hosts.append(ReapOutcome(name=current, action="failed", reason="destroy failed", error=f"{exc.message} Fix: {exc.fix}"))
     if not dry_run:
-        history = read_history(paths)
-        record = ReapRecord(finished_at=now(), source=source, report=report)
-        history = history.model_copy(update={source: record})
-        write_private(_record_path(paths), history.model_dump_json(indent=2) + "\n")
+        _record(paths, report, source, now())
     return report
+
+
+def _record(paths: Paths, report: ReapReport, source: Literal["timer", "manual"], finished_at: datetime) -> None:
+    history = read_history(paths).model_copy(update={source: ReapRecord(finished_at=finished_at, source=source, report=report)})
+    write_private(_record_path(paths), history.model_dump_json(indent=2) + "\n")
+
+
+def clear_lost(paths: Paths, env: str) -> None:
+    """Forget that ENV was lost to a reap once it is registered again or removed, so later hints stay true."""
+    history = read_history(paths)
+    changed = False
+    for record in (history.timer, history.manual):
+        if record is None:
+            continue
+        for outcome in record.report.hosts:
+            if env in outcome.lost_environments:
+                outcome.lost_environments.remove(env)
+                changed = True
+    if changed:
+        write_private(_record_path(paths), history.model_dump_json(indent=2) + "\n")
 
 
 def _reap_one(
@@ -326,7 +311,8 @@ def _reap_one(
             return ReapOutcome(name=name, action="skipped", reason="host no longer registered")
         if not operation_free and host.phase == "ready":
             return ReapOutcome(name=name, action="skipped", reason="another host operation is running")
-        decision = reap_decision(host, host_activity(paths, state, host), now(), operation_free=operation_free)
+        empty = not any(env.host == name and not worktree_gone(env.worktree_path) for env in state.envs.values())
+        decision = reap_decision(host, host_activity(paths, state, host), now(), operation_free=operation_free, empty=empty)
         lost = sorted(env.name for env in state.envs.values() if env.host == name)
         if not decision.destroy:
             return ReapOutcome(name=name, action="kept", reason=decision.reason)

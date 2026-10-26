@@ -21,7 +21,7 @@ A remote command can itself exit with codes 1–4. When execution and status com
 
 ## Auto-managed hosts
 
-With an auto-managed host ([configuration](configuration.md#auto-managed-hosts)), `offbox up` may spend a few minutes creating the VM, and `offbox rm` of the last environment destroys it. Agents should run `offbox rm --yes` when their work in a worktree is finished, so the VM stops billing. `offbox host reap --json` reports what was kept or destroyed and exits 1 if any host failed. `up`, `exec` and similar commands wait up to 10 minutes while a host is being destroyed, then fail with `Host NAME is being destroyed`; running them again recreates the host.
+With an auto-managed host ([configuration](configuration.md#auto-managed-hosts)), `offbox up` may spend a few minutes creating the VM, and `offbox rm` of the last environment destroys it. Agents should run `offbox rm --yes` when their work in a worktree is finished, so the VM stops billing. `offbox host reap --json` reports what was kept or destroyed and exits 1 if any host failed. Commands that use a host wait up to 10 minutes while it is being destroyed (`Host NAME is being destroyed`). After a destroy, `exec`, `shell`, `ports` and `logs` fail with `Environment is not registered`; run `offbox up` to recreate the host and environment.
 
 ## Diagnostics
 

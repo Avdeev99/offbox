@@ -1,11 +1,13 @@
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from html import escape as _escape
+from html import unescape
 from pathlib import Path
 
 from offbox import console
@@ -91,7 +93,7 @@ def preflight(paths: Paths, environment: Mapping[str, str], home: Path) -> None:
             fix = (
                 f"Store the Hetzner token in {paths.credentials} (mode 0600) instead of only exporting HCLOUD_TOKEN."
                 if provider.manifest.name == "hetzner"
-                else f"Export the required variables before installing the timer: {exc.fix}"
+                else f"Export them in the shell that runs --install-timer, which copies non-secret provider variables into the timer: {exc.fix}"
             )
             raise PreconditionError(f"The idle reaper cannot read credentials for host {name}: {exc.message}", fix) from exc
         if provider.manifest.name == "gcp" and not (home / ".config/gcloud/application_default_credentials.json").is_file():
@@ -120,7 +122,8 @@ def render_launchd(executable: Path, environment: Mapping[str, str], log: Path) 
 
 
 def _quote(value: str) -> str:
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+    return '"' + escaped + '"'
 
 
 def render_systemd(executable: Path, environment: Mapping[str, str]) -> tuple[str, str]:
@@ -192,4 +195,34 @@ def health(paths: Paths, now: datetime, last_run: datetime | None, failure: str 
             return None
     if now - reference > STALE_AFTER:
         return "The idle reaper has not run for over an hour (a sleeping laptop also delays it). Fix: offbox doctor, or reinstall with offbox host reap --install-timer."
+    return None
+
+
+def unit_problem(*, home: Path | None = None) -> str | None:
+    """A problem with an installed timer's target executable, such as an uninstalled offbox."""
+    files = unit_files(home or Path.home())
+    if not all(path.is_file() for path in files):
+        return None
+    try:
+        text = files[0].read_text()
+    except OSError:
+        return "The idle reaper unit cannot be read"
+    found = re.search(r"<key>ProgramArguments</key><array><string>([^<]+)</string>", text) or re.search(
+        r'^ExecStart="([^"]+)"', text, re.MULTILINE
+    )
+    if found is None:
+        return "The idle reaper unit has no executable"
+    executable = Path(unescape(found[1]).replace("%%", "%").replace("$$", "$"))
+    if not executable.is_file():
+        return f"The idle reaper runs {executable}, which no longer exists"
+    return None
+
+
+def check_installed_credentials(paths: Paths, *, home: Path | None = None) -> str | None:
+    """Re-run the timer's credential preflight; None when every auto-managed preset can be destroyed by the timer."""
+    root = home or Path.home()
+    try:
+        preflight(paths, unit_environment(paths, os.environ, root), root)
+    except PreconditionError as exc:
+        return f"{exc.message}. Fix: {exc.fix}"
     return None

@@ -93,7 +93,7 @@ def shared_usage(
             timeout=wait,
             clock=clock or SystemClock(),
             message=f"Host {name} is being destroyed",
-            fix="Retry the command once the destroy finishes; it recreates an auto-managed host.",
+            fix="Retry once the destroy finishes; offbox up recreates an auto-managed host.",
             shared=True,
         )
         try:

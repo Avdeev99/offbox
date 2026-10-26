@@ -19,7 +19,7 @@ from offbox.config import EnvConfig, Model, UserConfig, default_host, load_confi
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
 from offbox.host import host_operation, select_host
 from offbox.host.activity import forget, last_activity, touch
-from offbox.host.auto import ensure_host, lost_environment_hint, release_if_unused, timer_status
+from offbox.host.auto import clear_lost, ensure_host, lost_environment_hint, release_if_unused, timer_status
 from offbox.host.ready import Clock, SystemClock
 from offbox.host.timer import health as timer_health
 from offbox.host.timer import installed as timer_installed
@@ -108,6 +108,12 @@ def worktree_exists(root: Path) -> bool:
         return False
     except OSError as exc:
         raise PreconditionError(f"Cannot inspect worktree {root}", "Restore access to the worktree before running GC.") from exc
+
+
+def env_host_mismatch(previous: EnvState | None, configured: str | None) -> str | None:
+    if previous is None or configured is None or configured == previous.host:
+        return None
+    return f"This environment runs on {previous.host}; env.host says {configured}. Run offbox rm, then offbox up to move it."
 
 
 STOP_LOCK_WAIT_SECONDS = 10
@@ -438,6 +444,7 @@ class Runtime:
                     continue
                 env = self._up(work, self.ready_host(target), fresh=fresh, no_stack=no_stack)
                 touch(self.paths, env.name, utc_now())
+                clear_lost(self.paths, env.name)
                 return env
         raise PreconditionError("Host selection changed while starting", "Retry the command.")
 
@@ -452,10 +459,9 @@ class Runtime:
         config = project.env
         dockerfile = self.dockerfile_path(work, config.dockerfile) if config.dockerfile is not None else None
         previous = self._recorded(work)
-        if previous is not None and project.env.host is not None and project.env.host != previous.host:
-            console.warn(
-                f"This environment runs on {previous.host}; env.host says {project.env.host}. Run offbox rm, then offbox up to move it."
-            )
+        mismatch = env_host_mismatch(previous, project.env.host)
+        if mismatch is not None:
+            console.warn(mismatch)
         host = selected
         with host_operation(self.paths, host.name, wait_timeout=120, clock=self.clock):
             resource_result = self.remote(host, ["sh", "-c", _HOST_RESOURCES])
@@ -719,6 +725,7 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
             if current is not None and current.host == host.name and current.worktree_path == work.root:
                 del state.envs[work.name]
         forget(self.paths, work.name)
+        clear_lost(self.paths, work.name)
 
     def remove(self, *, cwd: Path | None = None) -> None:
         work, env, host = self.current(cwd)

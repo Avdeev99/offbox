@@ -4,7 +4,7 @@ Offbox is for one user's trusted development projects on a personal VM. Each wor
 
 ## Auto-managed hosts
 
-Automatic creation and destruction apply only to hosts whose user preset says `auto = true` and that offbox created that way; manual and existing SSH hosts are never touched. A repository's `env.host` can only select among your auto-managed presets. Destroying an auto-managed host deletes the VM and everything on it, including environments of worktrees that still exist. The scheduled reaper runs `offbox host reap` with your user account and no secrets in its unit file; it reads the same credentials file as interactive commands.
+Automatic creation and destruction apply only to hosts whose user preset says `auto = true` and that offbox created that way; manual and existing SSH hosts are never touched. A repository's `env.host` can select any registered host, but it can create one only from a user preset that has `auto = true`. Destroying an auto-managed host deletes the VM and everything on it, including environments of worktrees that still exist. The scheduled reaper runs `offbox host reap` with your user account and no secrets in its unit file; it reads the same credentials file as interactive commands.
 
 ## SSH trust and accounts
 

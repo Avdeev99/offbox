@@ -11,6 +11,8 @@ from offbox.drivers.tofu import TofuDriver
 from offbox.errors import OffboxError, PreconditionError, ProviderInterrupted, UsageError
 from offbox.host import host_operation, select_host
 from offbox.host.activity import forget as forget_activity
+from offbox.host.usage import describe, exclusive_usage, holders
+from offbox.host.warnings import warn_interrupted
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.providers import credentials_env, load_provider, validate_name
@@ -115,10 +117,12 @@ def destroy_host_locked(
         state.hosts.pop(host.name, None)
         state.envs = {name: env for name, env in state.envs.items() if env.host != host.name}
         if state.default_host == host.name:
-            state.default_host = next((name for name, item in state.hosts.items() if item.phase == "ready"), None)
+            state.default_host = next((name for name, item in state.hosts.items() if item.phase == "ready" and not item.auto), None)
         sync_config(paths, state)
     for env_name in envs:
         forget_activity(paths, env_name)
+    if host.create_interrupted:
+        warn_interrupted(paths, host.name)
     try:
         shutil.rmtree(directory)
     except OSError as exc:
@@ -138,5 +142,10 @@ def destroy_host_locked(
 
 def destroy_host(paths: Paths, runner: Runner, name: str | None = None, *, executable: Path | None = None, forget: bool = False) -> None:
     host = select_host(paths, name)
-    with host_operation(paths, host.name):
-        destroy_host_locked(paths, runner, host.name, executable=executable, forget=forget)
+    with exclusive_usage(paths, host.name) as free:
+        if not free:
+            raise PreconditionError(
+                f"Host {host.name} is in use by: {describe(holders(paths, host.name))}", "Wait for those commands to finish, then retry."
+            )
+        with host_operation(paths, host.name):
+            destroy_host_locked(paths, runner, host.name, executable=executable, forget=forget)

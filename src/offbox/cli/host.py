@@ -13,7 +13,7 @@ from offbox import console
 from offbox.config import Model
 from offbox.errors import OffboxError, PreconditionError, UsageError
 from offbox.host import select_host
-from offbox.host.auto import HostWarning, dismiss_warning, host_activity, read_warnings, timer_status
+from offbox.host.auto import host_activity, timer_status
 from offbox.host.auto import reap as reap_hosts
 from offbox.host.destroy import destroy_host
 from offbox.host.timer import health as timer_health
@@ -21,6 +21,7 @@ from offbox.host.timer import install as install_reaper
 from offbox.host.timer import installed as timer_installed
 from offbox.host.timer import remove as remove_reaper
 from offbox.host.usage import shared_usage, utc_now
+from offbox.host.warnings import HostWarning, dismiss_warning, read_warnings
 from offbox.paths import Paths
 from offbox.providers import validate_name
 from offbox.runner import Runner, SubprocessRunner
@@ -98,6 +99,10 @@ def use_host(paths: Paths, name: str) -> None:
     with StateStore(paths.state).transaction() as state:
         if name not in state.hosts or state.hosts[name].phase != "ready":
             raise PreconditionError(f"Host {name} is not ready or registered", "Create or initialise the host before selecting it.")
+        if state.hosts[name].auto:
+            raise PreconditionError(
+                f"Host {name} is auto-managed and cannot be the default", "Select it per project with env.host instead."
+            )
         state.default_host = name
     console.success(f"Default host: {name}")
 
@@ -258,7 +263,10 @@ def ssh(ctx: typer.Context, name: Annotated[str | None, typer.Argument(help="Hos
     tty = not command
     if tty and not sys.stdin.isatty():
         raise PreconditionError("Interactive SSH requires a TTY", "Pass a command after -- for noninteractive SSH.")
-    with shared_usage(Paths.discover(), host.name, "offbox host ssh"):
+    paths = Paths.discover()
+    with shared_usage(paths, host.name, "offbox host ssh"):
+        if select_host(paths, host.name) != host:
+            raise PreconditionError(f"Host {host.name} changed while starting", "Retry the command.")
         code = _runner(ctx).stream(ssh_argv(host.name, command, options=["-t"] if tty else []), stdin=tty, tty=tty)
     raise typer.Exit(code)
 

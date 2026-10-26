@@ -4,9 +4,11 @@ from pydantic import Field
 
 from offbox.config import Credentials, Model, UserConfig, default_host, load_config, load_credentials
 from offbox.errors import OffboxError, PreconditionError
-from offbox.host.auto import read_warnings, timer_status
+from offbox.host.auto import timer_status
 from offbox.host.timer import health as timer_health
+from offbox.host.timer import unit_problem
 from offbox.host.usage import utc_now
+from offbox.host.warnings import read_warnings
 from offbox.paths import Paths
 from offbox.project import load_project
 from offbox.runner import Runner
@@ -147,8 +149,18 @@ def diagnose(
     if state is not None:
         last_run, failure = timer_status(paths)
         warning = timer_health(paths, utc_now(), last_run, failure)
+        if warning is None:
+            warning = unit_problem()
         if warning is not None:
-            report.checks.append(Check(name="reaper", ok=False, message=warning, fix="Check offbox host reap and its timer logs."))
+            report.checks.append(
+                Check(
+                    name="reaper",
+                    ok=False,
+                    message=warning,
+                    fix=f"Run offbox host reap --dry-run, check {paths.logs / 'reaper.log'} (macOS) or journalctl --user -u offbox-reap (Linux), "
+                    "then reinstall with offbox host reap --install-timer.",
+                )
+            )
         for stored in read_warnings(paths):
             report.checks.append(
                 Check(name="host-warning", ok=False, message=stored.message, fix=f"offbox host list --dismiss {stored.host} once checked.")

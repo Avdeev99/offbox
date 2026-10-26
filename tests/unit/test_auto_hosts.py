@@ -14,17 +14,17 @@ from offbox.host import auto
 from offbox.host.activity import forget, last_activity, touch, worktree_gone
 from offbox.host.auto import (
     ReapOutcome,
-    dismiss_warning,
+    clear_lost,
     ensure_host,
     lost_environment_hint,
     read_history,
-    read_warnings,
     reap,
     reap_decision,
     release_if_unused,
 )
 from offbox.host.create import CreateOptions
 from offbox.host.usage import UsageHolder, exclusive_usage, holders, shared_usage
+from offbox.host.warnings import dismiss_warning, read_warnings
 from offbox.paths import Paths
 from offbox.runner import Runner
 from offbox.state import EnvState, HostState, State, StateStore
@@ -275,16 +275,17 @@ def test_reap_continues_past_failures_records_by_source_and_explains_lost_enviro
     destroyed: list[str] = []
     monkeypatch.setattr(auto, "destroy_host_locked", recorded_destroy(paths, destroyed, fail={"aaa"}))
     old = NOW - timedelta(hours=5)
+    (tmp_path / "repo").mkdir()
     write_state(
         paths,
         [host("aaa", created=old), host("bbb", created=old), host("ccc"), host("manual", auto_managed=False, created=old)],
         [env("repo-abcd", tmp_path / "repo", "bbb", created=old)],
     )
     planned = reap(paths, FakeRunner(), dry_run=True, now=lambda: NOW, clock=FakeClock())
-    assert [(item.name, item.action) for item in planned.hosts] == [("aaa", "destroy"), ("bbb", "destroy"), ("ccc", "kept")]
+    assert [(item.name, item.action) for item in planned.hosts] == [("aaa", "destroy"), ("bbb", "destroy"), ("ccc", "destroy")]
     assert destroyed == [] and read_history(paths).manual is None
     report = reap(paths, FakeRunner(), source="timer", now=lambda: NOW, clock=FakeClock())
-    assert [(item.name, item.action) for item in report.hosts] == [("aaa", "failed"), ("bbb", "destroyed"), ("ccc", "kept")]
+    assert [(item.name, item.action) for item in report.hosts] == [("aaa", "failed"), ("bbb", "destroyed"), ("ccc", "destroyed")]
     assert report.hosts[0].error == "tofu destroy failed Fix: Retry offbox host reap."
     assert report.hosts[1] == ReapOutcome(name="bbb", action="destroyed", reason="idle for 5h00m", lost_environments=["repo-abcd"])
     assert report.exit_code == 1
@@ -294,6 +295,159 @@ def test_reap_continues_past_failures_records_by_source_and_explains_lost_enviro
     assert auto.timer_status(paths)[1] == "aaa: tofu destroy failed Fix: Retry offbox host reap."
     retry = reap(paths, FakeRunner(), "manual", now=lambda: NOW, clock=FakeClock())
     assert [(item.action, item.reason) for item in retry.hosts] == [("skipped", "manual host")]
+
+
+def test_reap_destroys_empty_auto_hosts_even_with_idle_reaping_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = paths_at(tmp_path)
+    destroyed: list[str] = []
+    monkeypatch.setattr(auto, "destroy_host_locked", recorded_destroy(paths, destroyed))
+    write_state(paths, [host("empty", idle=None), host("busy", idle=None)], [env("live-abcd", tmp_path, "busy")])
+    report = reap(paths, FakeRunner(), now=lambda: NOW, clock=FakeClock())
+    assert [(item.name, item.action, item.reason) for item in report.hosts] == [
+        ("busy", "kept", "idle reaping is off"),
+        ("empty", "destroyed", "no environments use it"),
+    ]
+    assert destroyed == ["empty"]
+
+
+def test_reaped_hint_is_cleared_once_the_environment_returns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = paths_at(tmp_path)
+    monkeypatch.setattr(auto, "destroy_host_locked", recorded_destroy(paths, []))
+    write_state(paths, [host(created=NOW - timedelta(days=1))], [env("repo-abcd", tmp_path, created=NOW - timedelta(days=1))])
+    reap(paths, FakeRunner(), now=lambda: NOW, clock=FakeClock())
+    assert lost_environment_hint(paths, "repo-abcd") is not None
+    clear_lost(paths, "repo-abcd")
+    assert lost_environment_hint(paths, "repo-abcd") is None
+
+
+def test_rm_destroy_is_recorded_for_later_hints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = paths_at(tmp_path)
+    monkeypatch.setattr(auto, "destroy_host_locked", recorded_destroy(paths, []))
+    write_state(paths, [host()], [env("gone-abcd", tmp_path / "removed")])
+    assert release_if_unused(paths, FakeRunner(), "agg", clock=FakeClock()) is True
+    assert "(last environment removed)" in (lost_environment_hint(paths, "gone-abcd") or "")
+
+
+def forgettable_host(paths: Paths, *, interrupted: bool = False) -> HostState:
+    workspace = paths.state / "hosts/main/provider"
+    workspace.mkdir(parents=True)
+    (workspace / "provider.toml").write_text('name="ssh"\ndescription="existing"\ndriver="none"\n')
+    return HostState(
+        name="main",
+        provider="ssh",
+        address="192.0.2.1",
+        ssh_user="offbox",
+        created_at=NOW,
+        provider_dir=workspace,
+        known_hosts_path=workspace.parent / "known_hosts",
+        create_interrupted=interrupted,
+    )
+
+
+def forget_runner() -> FakeRunner:
+    return FakeRunner([Script(prefix=["ssh", "-O", "check"], returncode=255, stderr="Control socket connect(/tmp/control): No such file")])
+
+
+def test_auto_hosts_never_become_the_default(tmp_path: Path) -> None:
+    from offbox.cli.host import use_host
+    from offbox.host.destroy import destroy_host
+
+    paths = paths_at(tmp_path)
+    write_state(paths, [host("agg"), forgettable_host(paths)], default="main")
+    with pytest.raises(PreconditionError, match="auto-managed and cannot be the default") as caught:
+        use_host(paths, "agg")
+    assert caught.value.fix == "Select it per project with env.host instead."
+    destroy_host(paths, forget_runner(), "main", forget=True)
+    state = StateStore(paths.state).read()
+    assert (sorted(state.hosts), state.default_host) == (["agg"], None)
+
+
+def test_destroying_an_interrupted_creation_keeps_a_dismissable_warning(tmp_path: Path) -> None:
+    from offbox.host.destroy import destroy_host
+
+    paths = paths_at(tmp_path)
+    write_state(paths, [forgettable_host(paths, interrupted=True)])
+    destroy_host(paths, forget_runner(), "main", forget=True)
+    assert [warning.message for warning in read_warnings(paths)] == [
+        "Creation of main was interrupted; check the provider console for resources labelled offbox-host=main"
+    ]
+
+
+def test_host_destroy_refuses_a_host_in_use(tmp_path: Path) -> None:
+    from offbox.host.destroy import destroy_host
+
+    paths = paths_at(tmp_path)
+    write_state(paths, [host("main", auto_managed=False)])
+    with (
+        shared_usage(paths, "main", "offbox exec", now=lambda: NOW),
+        pytest.raises(PreconditionError, match=r"Host main is in use by: offbox exec \(pid ") as caught,
+    ):
+        destroy_host(paths, FakeRunner(), "main")
+    assert caught.value.fix == "Wait for those commands to finish, then retry."
+    assert "main" in StateStore(paths.state).read().hosts
+
+
+def test_exec_after_a_destroy_finished_during_the_wait_fails_without_ssh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.naming import worktree_name
+    from offbox.runtime import Runtime
+
+    paths = paths_at(tmp_path)
+    root = tmp_path / "repo"
+    root.mkdir()
+    name = worktree_name(root)
+    write_state(paths, [host()], [env(name, root)])
+
+    @contextmanager
+    def destroyed_while_waiting(paths_: Paths, host_name: str, command: str, **_: object) -> Generator[None]:
+        write_state(paths, [])
+        yield
+
+    monkeypatch.setattr("offbox.runtime.shared_usage", destroyed_while_waiting)
+    runner = FakeRunner([Script(prefix=["git"], stdout=str(root))])
+    with (
+        pytest.raises(PreconditionError, match="Environment is not registered"),
+        Runtime(paths, runner, FakeClock()).using("offbox exec", root),
+    ):
+        pass
+    assert [call.argv[0] for call in runner.calls] == ["git"]
+
+
+def test_env_host_mismatch_message() -> None:
+    from offbox.runtime import env_host_mismatch
+
+    recorded = env("repo-abcd", Path("/repo"), "main")
+    assert env_host_mismatch(None, "agg") is None
+    assert env_host_mismatch(recorded, None) is None
+    assert env_host_mismatch(recorded, "main") is None
+    assert (
+        env_host_mismatch(recorded, "agg") == "This environment runs on main; env.host says agg. Run offbox rm, then offbox up to move it."
+    )
+
+
+def test_doctor_reports_a_timer_whose_executable_is_gone(tmp_path: Path) -> None:
+    from offbox.host import timer
+
+    plist = timer.unit_files(tmp_path, "Darwin")[0]
+    plist.parent.mkdir(parents=True)
+    plist.write_text(timer.render_launchd(tmp_path / "gone/offbox", {"HOME": str(tmp_path)}, tmp_path / "log"))
+    if timer.unit_files(tmp_path) != [plist]:
+        for path in timer.unit_files(tmp_path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        service, unit = timer.render_systemd(tmp_path / "gone/offbox", {"HOME": str(tmp_path)})
+        timer.unit_files(tmp_path)[0].write_text(service)
+        timer.unit_files(tmp_path)[1].write_text(unit)
+    assert timer.unit_problem(home=tmp_path) == f"The idle reaper runs {tmp_path / 'gone/offbox'}, which no longer exists"
+    (tmp_path / "gone").mkdir()
+    (tmp_path / "gone/offbox").write_text("")
+    assert timer.unit_problem(home=tmp_path) is None
+
+
+def test_systemd_values_escape_specifiers() -> None:
+    from offbox.host.timer import render_systemd
+
+    service, _ = render_systemd(Path("/opt/100%/offbox"), {"PATH": "/a$b"})
+    assert 'Environment="PATH=/a$$b"' in service
+    assert 'ExecStart="/opt/100%%/offbox" host reap --from-timer' in service
 
 
 def test_reap_skips_hosts_in_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -308,17 +462,19 @@ def test_reap_skips_hosts_in_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert destroyed == []
 
 
-def test_interrupted_creations_leave_a_dismissable_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_interrupted_creations_are_reaped_and_warnings_dismissed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from offbox.host.warnings import warn_interrupted
+
     paths = paths_at(tmp_path)
     destroyed: list[str] = []
     monkeypatch.setattr(auto, "destroy_host_locked", recorded_destroy(paths, destroyed))
     interrupted = host(phase="creating", created=NOW - timedelta(hours=2)).model_copy(update={"create_interrupted": True})
     write_state(paths, [interrupted])
     report = reap(paths, FakeRunner(), now=lambda: NOW, clock=FakeClock())
-    assert report.hosts[0].action == "destroyed"
-    assert [warning.message for warning in read_warnings(paths)] == [
-        "Creation of agg was interrupted; check the provider console for resources labelled offbox-host=agg"
-    ]
+    assert (report.hosts[0].action, destroyed) == ("destroyed", ["agg"])
+    warn_interrupted(paths, "agg")
+    warn_interrupted(paths, "agg")
+    assert [warning.host for warning in read_warnings(paths)] == ["agg"]
     assert dismiss_warning(paths, "agg") is True
     assert read_warnings(paths) == []
     assert dismiss_warning(paths, "agg") is False
@@ -390,9 +546,9 @@ def test_timer_refuses_ephemeral_executables(tmp_path: Path, monkeypatch: pytest
 
     from offbox.host import timer
 
-    ephemeral = Path(tempfile.gettempdir()) / "offbox-ephemeral-test" / "offbox"
-    ephemeral.parent.mkdir(exist_ok=True)
+    ephemeral = tmp_path / "offbox"
     ephemeral.write_text("")
+    assert ephemeral.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
 
     def which(name: str, path: str | None = None) -> str:
         return str(ephemeral)
