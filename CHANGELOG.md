@@ -26,11 +26,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Commands run by offbox see `OFFBOX_ENV` set to the environment name.
 - Project settings can also come from `[project]` tables in the user `config.toml`, an uncommitted `offbox.local.toml` and `OFFBOX_<SECTION>_<KEY>` environment variables, merged per key with later sources winning.
 - `offbox config [--json]` shows every effective project setting with its source and variable name.
+- Auto-managed hosts: `auto = true` on a host preset creates the VM on the first `offbox up` that needs it and destroys it when its last environment is removed or after `idle` (default `2h`) without use, guarded by a shared usage lock so running commands never lose their host. `offbox host reap [--dry-run] [--json]` reaps idle hosts and abandoned creations, `--install-timer` schedules it every 15 minutes, and `env.host` selects a project's host by name.
 
 ### Changed
 
 - The git mirror is on by default and also mirrors the remote's default branch (`origin/HEAD`); set `git.mirror = false` to opt out. Environments without a recorded mirror approval accept the default mirror without a new `up`; others need one `offbox up`.
 - Fix lines that named `offbox.toml` now point to `offbox config`, because a value can come from any settings source.
+- The state file gains host lifecycle fields; after upgrading, older offbox versions can no longer read it.
 - Host bootstrap waits up to 10 minutes for apt/dpkg locks, enables unattended upgrades last, and keeps installed containerd and Docker plugin versions when rerun so `host init` does not restart Docker.
 - The universal image base is pinned by digest, upgrades Ubuntu packages during the build and is rebuilt weekly without layer cache.
 - The README describes the problem offbox solves, measured results, comparisons and common questions; development details moved to CONTRIBUTING.md.

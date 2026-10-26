@@ -1,4 +1,5 @@
 import os
+import re
 import stat
 import tomllib
 from collections.abc import Mapping
@@ -15,6 +16,21 @@ class Model(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
+HOST_NAME = r"^[a-z][a-z0-9-]{0,31}$"
+_DURATION = re.compile(r"([1-9][0-9]{0,5})([mhd])")
+_DURATION_SECONDS = {"m": 60, "h": 3600, "d": 86400}
+
+
+def duration_seconds(value: str) -> int | None:
+    """Seconds for a duration such as 30m, 2h or 1d; None for off."""
+    if value == "off":
+        return None
+    match = _DURATION.fullmatch(value)
+    if match is None:
+        raise ValueError("use a duration such as 30m, 2h or 1d, or off")
+    return int(match[1]) * _DURATION_SECONDS[match[2]]
+
+
 class HostPreset(Model):
     provider: str = "hetzner"
     size: str | None = None
@@ -23,6 +39,15 @@ class HostPreset(Model):
     address: str | None = None
     port: int = Field(default=22, ge=1, le=65535)
     ssh_key: Path | None = None
+    auto: bool = False
+    idle: str = "2h"
+
+    @model_validator(mode="after")
+    def validate_lifecycle(self) -> Self:
+        duration_seconds(self.idle)
+        if self.auto and self.provider == "ssh":
+            raise ValueError("auto applies to cloud providers; existing SSH servers are never created or destroyed automatically")
+        return self
 
 
 class UserConfig(Model):
@@ -32,6 +57,7 @@ class UserConfig(Model):
 
 
 class EnvConfig(Model):
+    host: str | None = Field(default=None, pattern=HOST_NAME)
     image: str | None = None
     dockerfile: Path | None = None
     cpus: float | None = Field(default=None, gt=0, allow_inf_nan=False)

@@ -4,6 +4,11 @@ from pydantic import Field
 
 from offbox.config import Credentials, Model, UserConfig, default_host, load_config, load_credentials
 from offbox.errors import OffboxError, PreconditionError
+from offbox.host.auto import timer_status
+from offbox.host.timer import health as timer_health
+from offbox.host.timer import unit_problem
+from offbox.host.usage import utc_now
+from offbox.host.warnings import read_warnings
 from offbox.paths import Paths
 from offbox.project import load_project
 from offbox.runner import Runner
@@ -106,11 +111,18 @@ def diagnose(
     configured_key = False
     if user is not None and state is not None:
         selected = default_host(user, state.default_host)
-        if selected is None:
+        auto = sorted(name for name, preset in user.hosts.items() if preset.auto)
+        if selected is None and auto:
+            report.checks.append(
+                Check(name="host", ok=True, message=f"Auto-managed hosts are created on first offbox up: {', '.join(auto)}")
+            )
+        elif selected is None:
             report.checks.append(Check(name="host", ok=False, message=NO_DEFAULT_HOST, fix="Run offbox setup."))
         else:
             host = state.hosts.get(selected)
-            if host is None:
+            if host is None and selected in auto:
+                report.checks.append(Check(name="host", ok=True, message=f"Auto-managed host {selected} is created on first offbox up"))
+            elif host is None:
                 report.checks.append(
                     _failure(
                         "host",
@@ -134,6 +146,25 @@ def diagnose(
                     )
                 except OffboxError as exc:
                     report.checks.append(_failure("host", exc))
+    if state is not None:
+        last_run, failure = timer_status(paths)
+        warning = timer_health(paths, utc_now(), last_run, failure)
+        if warning is None:
+            warning = unit_problem(paths)
+        if warning is not None:
+            report.checks.append(
+                Check(
+                    name="reaper",
+                    ok=False,
+                    message=warning,
+                    fix=f"Run offbox host reap --dry-run, check {paths.logs / 'reaper.log'} (macOS) or journalctl --user -u offbox-reap (Linux), "
+                    "then reinstall with offbox host reap --install-timer.",
+                )
+            )
+        for stored in read_warnings(paths):
+            report.checks.append(
+                Check(name="host-warning", ok=False, message=stored.message, fix=f"offbox host list --dismiss {stored.host} once checked.")
+            )
     try:
         if ssh_key is not None:
             key, configured_key = ssh_key, True

@@ -213,7 +213,6 @@ Install commands and declared hash files are explicit configuration. A failed in
 - `Fix: Name refs such as origin/main in git.refs.`
 - `Fix: Fetch it or remove it from git.refs; offbox config shows which source sets it.`
 - `Fix: Check git in the environment image, then retry; set git.mirror = false (or OFFBOX_GIT_MIRROR=false) to run without git.`
-- `Fix: add git to the image or set git.mirror = false.`
 - `Fix: Check the repository's info/exclude permissions.`
 - `Fix: Check offbox status, then retry; set git.mirror = false (or OFFBOX_GIT_MIRROR=false) to run without git.`
 - `Fix: Unset <variable>; setting variables are OFFBOX_<SECTION>_<KEY> for keys in the configuration reference.`
@@ -395,3 +394,31 @@ These instructions can arrive through SSH from the packaged host/image scripts. 
 Exit 4 can mean command completion is unknown, even if the remote command is still running. Do not retry non-idempotent work blindly. The error includes the run ID and a scoped `offbox-run --signal TERM` cleanup command; inspect the environment and use that command only when you want to stop that run. A confirmed remote exit 255 still returns 255.
 
 A contended routine host operation waits up to 120 seconds, and forwarding waits up to 30 seconds. A timeout retains exclusive locking and asks you to retry after the competing operation finishes. `exec` waits up to ten minutes for a dependency installation already running in the same environment; `up` fails immediately in that case with `Fix: Retry after the current installation finishes.` Destructive lifecycle conflicts also fail immediately.
+
+## Auto-managed hosts and the idle reaper
+
+`offbox host reap --dry-run` explains every decision. `offbox host list` shows idle limits, last use and stored warnings; `offbox doctor` reports reaper problems.
+
+- `Fix: Run offbox host destroy <name>, then retry.` (a creation that never finished)
+- `Fix: Delete them in the provider console or choose another host name, then run offbox host destroy <name> to clear the local record.`
+- `Fix: Retry once the destroy finishes; offbox up recreates an auto-managed host.`
+- `Fix: Retry the command.` (the host selection changed while a command started)
+- `Fix: Run offbox setup, set env.host, or offbox host use NAME.`
+- `Fix: run offbox host reap <name> once they finish.` (when no timer is installed it adds `, or install the idle reaper with offbox host reap --install-timer`)
+- `Fix: Wait for those commands to finish, then retry.` (`host destroy` of a host in use)
+- `Fix: Select it per project with env.host instead.` (`host use` of an auto-managed host)
+- `Fix: Run offbox host list or create this host.`
+- `Fix: Run offbox host list.`
+- `Fix: Check state directory permissions.`
+- `Fix: Repair the environment state.`
+- `Fix: Run one of them.` (`--install-timer` together with `--remove-timer`)
+- `Fix: Store the Hetzner token in <credentials.toml> (mode 0600) instead of only exporting HCLOUD_TOKEN.`
+- `Fix: Export them in the shell that runs --install-timer, which copies non-secret provider variables into the timer: <fix>`
+- `Fix: Run gcloud auth application-default login, then retry.`
+- `Fix: Install it with uv tool install offbox, then retry.`
+- `Fix: Run offbox host reap from your own scheduler.`
+- `Fix: Run offbox host reap --dry-run, check <state>/logs/reaper.log (macOS) or journalctl --user -u offbox-reap (Linux), then reinstall with offbox host reap --install-timer.`
+- `Fix: offbox doctor, or reinstall with offbox host reap --install-timer.`
+- `Fix: offbox host list --dismiss <name> once checked.`
+- `Fix: offbox up (host <name> was reaped at <time> (<reason>); its Docker data is gone)`
+- `Fix: add git to the image or set git.mirror = false.`

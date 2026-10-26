@@ -121,6 +121,7 @@ refs = ["origin/release"]
 
 | Key | Variable | Default | Behavior |
 | --- | --- | --- | --- |
+| `env.host` | `OFFBOX_ENV_HOST` | Unset | Host a **new** environment uses, by name. An existing environment keeps its recorded host. With an auto-managed preset of that name, `up` creates the host on demand; see [auto-managed hosts](#auto-managed-hosts). |
 | `env.image` | `OFFBOX_ENV_IMAGE` | Package `DEFAULT_IMAGE` | Registry image for the environment. Omit to use the packaged universal image. |
 | `env.dockerfile` | `OFFBOX_ENV_DOCKERFILE` | Unset | Alternative Dockerfile inside this worktree; mutually exclusive with `image`. Source is flushed before the host builds it. |
 | `env.cpus` | `OFFBOX_ENV_CPUS` | `max(1, host CPUs - 1)` | Finite CPU limit, from 0.01 through the host CPU count. |
@@ -225,10 +226,48 @@ ssh_key = "~/.ssh/id_ed25519"
 | `hosts.NAME.address` | Unset | Accepted existing-host address field; `host init` requires its target explicitly and does not read this preset. |
 | `hosts.NAME.port` | `22` | Accepted existing-host port field; pass `--port` explicitly to `host init` when different from 22. |
 | `hosts.NAME.ssh_key` | `~/.ssh/id_ed25519`, or `~/.ssh/offbox_ed25519` when only that key exists | Local private-key path used by `host create`; `host init` uses the same default. It must be usable without an interactive passphrase prompt, or loaded into an agent. |
+| `hosts.NAME.auto` | `false` | Let offbox create this cloud host on first use and destroy it when unused; see [auto-managed hosts](#auto-managed-hosts). Not allowed with `provider = "ssh"`. |
+| `hosts.NAME.idle` | `"2h"` | For an auto-managed host, how long it may sit unused before `offbox host reap` destroys it: a number with `m`, `h` or `d`, or `off`. |
 
 `host init` does not load host presets. Pass `USER@ADDRESS`, any nondefault `--port`, and `--ssh-key` explicitly, for example `offbox host init dev@192.0.2.10 --name home --port 2222 --ssh-key ~/.ssh/home --host-key-fingerprint SHA256:...`.
 
-A registered environment always uses its recorded host. Changing the default does not move it. Remove that environment before selecting another host with `up --host NAME`.
+A registered environment always uses its recorded host. Changing the default does not move it. Remove that environment before selecting another host with `up --host NAME`. A new environment uses `--host`, then `env.host`, then the default host. `offbox doctor` passes without a default host when auto-managed presets exist, because `up` creates them on demand.
+
+## Auto-managed hosts
+
+An auto-managed host exists only while worktrees use it. Opt in per preset:
+
+```toml
+# ~/.config/offbox/config.toml
+[hosts.agg-ai]
+provider = "hetzner"
+size = "ccx33"
+auto = true
+idle = "2h"
+
+[project.env]          # or env.host in a repository's offbox.toml
+host = "agg-ai"
+```
+
+**Creation.** `offbox up` in a worktree whose host is `agg-ai` creates the VM `offbox-agg-ai` if it does not exist, prints `Creating auto-managed host agg-ai: billable until destroyed; …`, and continues. Parallel `up` commands on the same laptop create it once: they serialize on the host's lock, wait up to 15 minutes, and join the new host. A repository can only name a host; creation needs a user preset with `auto = true`. If cloud resources named `offbox-agg-ai` already exist (for example from another laptop), creation stops instead of adopting or duplicating them. An auto-managed host never becomes the default host: creation does not set it, `offbox host use` refuses it, and destroying the default host does not promote one. `auto` and `idle` are recorded when the host is created; editing the preset later affects the next host, not a running one. Hosts made by `offbox host create`, `setup` or `host init` are never destroyed automatically.
+
+**Destruction.** Only these commands destroy an auto-managed host:
+
+| Command | Destroys when |
+| --- | --- |
+| `offbox rm` | it removed the last environment on the host whose worktree still exists (removed worktrees do not count) |
+| `offbox host reap [NAME]` | no environment with an existing worktree uses it (whatever `idle` says), it has been unused for longer than `idle`, or its creation started over 30 minutes ago and never finished |
+| `offbox host destroy NAME` | always, as for any host, but it refuses while a command holds the host |
+
+A host is in use while any `up`, `exec`, `shell`, `ports`, `logs --stack`, `host ssh` or the removal step of `rm` runs against it: those commands hold a shared lock that `rm`, `host reap` and `host destroy` cannot take, so a long test run never loses its VM. Activity is recorded when `up` succeeds and at the start and end of `exec`, `shell`, `ports` and `logs --stack`, per environment, in `~/.local/state/offbox/activity/`. Browsing forwarded ports, editing synced files, `offbox status` and a running Compose stack with nothing attached are not activity; raise `idle` if you work that way. Idle reaping applies whether or not the worktrees still exist.
+
+When the last `rm` finds the host busy, it waits a minute, then names the commands holding it (`Host NAME is still in use by: …`) and leaves the host for `offbox host reap`, which destroys it once it is free because no environment uses it. Destroying the VM loses its Docker volumes, images and installed dependencies; source stays on the laptop through sync. The next `offbox up` creates a fresh host and reinstalls. `exec`, `shell`, `ports` and `logs` in a worktree whose host was destroyed fail with `Environment is not registered`, and the fix says when and why the host went; run `offbox up` to start again. `up` warns when an environment's recorded host differs from `env.host`: `This environment runs on HOST; env.host says OTHER. Run offbox rm, then offbox up to move it.`
+
+`offbox host reap --dry-run` shows each decision without changing anything, and `--json` emits a typed report: `dry_run` and `hosts`, each with `name`, `action` (`kept`, `destroy` for a dry run, `destroyed`, `skipped` or `failed`), `reason`, `lost_environments` and `error`. A host is `skipped` when commands hold it or another host operation does not finish within 5 seconds. Reap exits 1 when any host failed and continues with the others; `reap NAME` of an unknown host fails. `offbox host list` shows each auto-managed host's idle limit, last use and reap time, and `--json` adds `auto`, `idle_seconds`, `last_activity`, `reaps_after`, `timer_installed`, `timer_warning` and stored `warnings`. When a host whose creation was killed mid-apply is destroyed, offbox keeps a warning to check the provider console for resources labelled `offbox-host=NAME`; `offbox host list --dismiss NAME` clears it. `offbox list` shows each environment's last use.
+
+**The idle reaper.** Nothing runs `host reap` on a schedule by default. `offbox host reap --install-timer` installs a per-user launchd agent (macOS) or systemd timer (Linux) that runs it every 15 minutes; `--remove-timer` and `offbox uninstall` remove it. Before installing, offbox checks that every auto-managed preset's credentials are readable without your shell's environment: store the Hetzner token in `credentials.toml` rather than only exporting `HCLOUD_TOKEN`, and keep Google application default credentials at their default path. The unit receives `HOME`, `PATH` (the directories of OpenTofu or Terraform, ssh, git and Mutagen including offbox's downloaded copy, then `/usr/bin:/bin:/usr/sbin:/sbin`), `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` when set, and `GOOGLE_PROJECT` when set, never a secret. launchd also runs it at load, and the systemd timer catches up after a missed run. Its output goes to `~/.local/state/offbox/logs/reaper.log` on macOS and to `journalctl --user -u offbox-reap` on Linux. It needs an installed `offbox` (`uv tool install`), not a temporary `uvx` copy. `offbox doctor`, `host list` and `up` warn when the timer has not run for an hour (measured from its install until its first run) or its last run failed, and `doctor` also checks that the executable it runs still exists. When a timer is installed and `up` creates an auto-managed host, offbox re-checks the timer's credentials and warns if it could not destroy that host. The reaper runs on the laptop, so a sleeping laptop delays it; the VM keeps billing until the next run.
+
+**Example day.** Agent 1 runs `up` at 09:00 and the VM is created; agent 2 joins it. Agent 1 runs `rm` at 12:00 and the VM stays. Agent 2 runs `rm` at 13:00 and the VM is destroyed. Had agent 2 crashed instead, the timer would destroy the VM about two hours after its last use.
 
 ## Credentials
 

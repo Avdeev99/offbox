@@ -57,6 +57,10 @@ Existing-host bootstrap sets `OFFBOX_HARDEN=0`. It installs the offbox account, 
 
 The shared network is `10.89.0.0/16`; an existing network named `offbox` with a different subnet is rejected. Bootstrap preserves unrelated containers and volumes. Destroying a registered SSH host validates container/volume ownership labels before deletion and removes owned host directories. As its final remote step it deletes `/etc/sudoers.d/offbox` and `/home/offbox/.ssh/authorized_keys`, so the `offbox` user loses passwordless root and Offbox's SSH access; Docker and the `offbox` account itself are retained. For a server that is unreachable or already gone, `offbox host destroy NAME --forget` removes only the local record and directory and lists what remains on the server for manual cleanup; it is refused for cloud hosts. New Offbox networks carry `offbox.managed=1`; adopted or older unlabelled networks are preserved during destruction. A managed network referenced by unrelated running or stopped containers is refused before any owned resources are deleted; inspect its members with `offbox host ssh NAME -- docker ps -a --filter network=offbox` before resolving the conflict.
 
+## Name collisions
+
+A host named `NAME` creates cloud resources named after `offbox-NAME`: on Hetzner the server and firewall; on Google Cloud the instance, network, subnetwork and the `offbox-NAME-ssh` firewall rule. If they already exist in the provider project, creation fails with `Cloud resources named offbox-NAME already exist in the provider project` instead of adopting them. Delete them in the provider console or choose another host name, then run `offbox host destroy NAME` to clear the local record.
+
 ## Provider workspaces and recovery
 
 Built-in providers ship inside the wheel. A provider folder under `$XDG_CONFIG_HOME/offbox/providers/<name>` overrides a built-in provider of the same name. See [the provider contract](writing-a-provider.md).

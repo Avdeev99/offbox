@@ -5,7 +5,8 @@ import math
 import re
 import shlex
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal, DecimalException
 from pathlib import Path
@@ -14,10 +15,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from offbox import DEFAULT_IMAGE, __version__, console
-from offbox.config import EnvConfig, Model
+from offbox.config import EnvConfig, Model, UserConfig, default_host, load_config
 from offbox.errors import CommandFailed, ConnectionError_, OffboxError, PreconditionError
 from offbox.host import host_operation, select_host
+from offbox.host.activity import forget, last_activity, touch
+from offbox.host.auto import clear_lost, ensure_host, lost_environment_hint, release_if_unused, timer_status
 from offbox.host.ready import Clock, SystemClock
+from offbox.host.timer import health as timer_health
+from offbox.host.timer import installed as timer_installed
+from offbox.host.usage import shared_usage, utc_now
 from offbox.naming import Worktree, find_worktree, validate_env_name
 from offbox.paths import Paths
 from offbox.ports import PortManager
@@ -74,6 +80,7 @@ class EnvSummary(Model):
     status: str
     running: bool = False
     image_digest: str | None = None
+    last_used: datetime | None = None
     fix: str | None = None
 
 
@@ -101,6 +108,12 @@ def worktree_exists(root: Path) -> bool:
         return False
     except OSError as exc:
         raise PreconditionError(f"Cannot inspect worktree {root}", "Restore access to the worktree before running GC.") from exc
+
+
+def env_host_mismatch(previous: EnvState | None, configured: str | None) -> str | None:
+    if previous is None or configured is None or configured == previous.host:
+        return None
+    return f"This environment runs on {previous.host}; env.host says {configured}. Run offbox rm, then offbox up to move it."
 
 
 STOP_LOCK_WAIT_SECONDS = 10
@@ -337,12 +350,36 @@ class Runtime:
             raise PreconditionError("Environment name collides with another worktree", "Use a different worktree directory name.")
         return env
 
-    def current(self, cwd: Path | None = None) -> tuple[Worktree, EnvState, HostState]:
-        work = find_worktree(self.runner, cwd)
+    def registered(self, work: Worktree) -> EnvState:
         env = self._recorded(work)
         if env is None:
-            raise PreconditionError("Environment is not registered", "offbox up")
+            hint = lost_environment_hint(self.paths, work.name)
+            raise PreconditionError("Environment is not registered", f"offbox up ({hint})" if hint else "offbox up")
+        return env
+
+    def current(self, cwd: Path | None = None) -> tuple[Worktree, EnvState, HostState]:
+        work = find_worktree(self.runner, cwd)
+        env = self.registered(work)
         return work, env, self._host(env.host)
+
+    @contextmanager
+    def using(self, command: str, cwd: Path | None = None) -> Generator[tuple[Worktree, EnvState, HostState]]:
+        """Hold the host's shared usage lock and record activity around a command, so no reap or rm destroys the host under it."""
+        work = find_worktree(self.runner, cwd)
+        for _attempt in range(2):
+            peeked = self.registered(work).host
+            with shared_usage(self.paths, peeked, command, clock=self.clock):
+                env = self.registered(work)
+                if env.host != peeked:
+                    continue
+                host = self._host(env.host)
+                touch(self.paths, env.name, utc_now())
+                try:
+                    yield work, env, host
+                finally:
+                    touch(self.paths, env.name, utc_now())
+                return
+        raise PreconditionError("Host selection changed while starting", "Retry the command.")
 
     @measured("Container operation")
     def mutate(
@@ -361,11 +398,60 @@ class Runtime:
             timeout=600,
         )
 
+    def up_target(self, work: Worktree, host_name: str | None) -> str:
+        """The host an up uses: the recorded host of an existing environment, else --host, env.host or the default host."""
+        previous = self._recorded(work)
+        if previous is not None:
+            if host_name is not None and previous.host != host_name:
+                raise PreconditionError("Environment is registered on another host", "Remove it before selecting a different host.")
+            return previous.host
+        selected = (
+            host_name
+            or load_project(self.paths, work.root).env.host
+            or default_host(load_config(self.paths.user_config, UserConfig), self.store.read().default_host)
+        )
+        if selected is None:
+            raise PreconditionError("No default host", "Run offbox setup, set env.host, or offbox host use NAME.")
+        return selected
+
+    def ready_host(self, name: str) -> HostState:
+        host = self.store.read().hosts.get(name)
+        if host is None or (host.auto and host.phase != "ready"):
+            return ensure_host(self.paths, self.runner, name, clock=self.clock, timer_installed=timer_installed)
+        return self._host(name)
+
+    def _check_project(self, work: Worktree) -> None:
+        from offbox.execute import check_exec_env, execution_env, install_paths
+
+        project = load_project(self.paths, work.root)
+        install_paths(project.install.when)
+        execution_env(project.exec.env, {}, tty=False)
+        check_exec_env(self.paths, project.exec.env)
+        if project.env.dockerfile is not None:
+            self.dockerfile_path(work, project.env.dockerfile)
+
     def up(self, *, cwd: Path | None = None, host_name: str | None = None, fresh: bool = False, no_stack: bool = False) -> EnvState:
+        work = find_worktree(self.runner, cwd)
+        self._check_project(work)
+        last_run, failure = timer_status(self.paths)
+        warning = timer_health(self.paths, utc_now(), last_run, failure)
+        if warning is not None:
+            console.warn(warning)
+        for _attempt in range(2):
+            target = self.up_target(work, host_name)
+            with shared_usage(self.paths, target, "offbox up", clock=self.clock):
+                if self.up_target(work, host_name) != target:
+                    continue
+                env = self._up(work, self.ready_host(target), fresh=fresh, no_stack=no_stack)
+                touch(self.paths, env.name, utc_now())
+                clear_lost(self.paths, env.name)
+                return env
+        raise PreconditionError("Host selection changed while starting", "Retry the command.")
+
+    def _up(self, work: Worktree, selected: HostState, *, fresh: bool, no_stack: bool) -> EnvState:
         from offbox.execute import Executor, check_exec_env, execution_env, install_paths, unapproved_exec_env
         from offbox.share import Sharing, git_sharing, sharing_additions
 
-        work = find_worktree(self.runner, cwd)
         project = load_project(self.paths, work.root)
         install_paths(project.install.when)
         execution_env(project.exec.env, {}, tty=False)
@@ -373,9 +459,10 @@ class Runtime:
         config = project.env
         dockerfile = self.dockerfile_path(work, config.dockerfile) if config.dockerfile is not None else None
         previous = self._recorded(work)
-        if previous is not None and host_name is not None and previous.host != host_name:
-            raise PreconditionError("Environment is registered on another host", "Remove it before selecting a different host.")
-        host = self._host(previous.host if previous is not None else host_name)
+        mismatch = env_host_mismatch(previous, project.env.host)
+        if mismatch is not None:
+            console.warn(mismatch)
+        host = selected
         with host_operation(self.paths, host.name, wait_timeout=120, clock=self.clock):
             resource_result = self.remote(host, ["sh", "-c", _HOST_RESOURCES])
             try:
@@ -637,13 +724,19 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
             current = state.envs.get(work.name)
             if current is not None and current.host == host.name and current.worktree_path == work.root:
                 del state.envs[work.name]
+        forget(self.paths, work.name)
+        clear_lost(self.paths, work.name)
 
     def remove(self, *, cwd: Path | None = None) -> None:
         work, env, host = self.current(cwd)
-        with host_operation(self.paths, host.name, wait_timeout=STOP_LOCK_WAIT_SECONDS, clock=self.clock):
+        with (
+            shared_usage(self.paths, host.name, "offbox rm", clock=self.clock),
+            host_operation(self.paths, host.name, wait_timeout=STOP_LOCK_WAIT_SECONDS, clock=self.clock),
+        ):
             self._check_record(work, env, host)
             self._remove(host, work, registered=True)
         console.success(f"Removed {work.name}")
+        release_if_unused(self.paths, self.runner, host.name, clock=self.clock, timer_installed=timer_installed)
 
     def report(self) -> EnvReport:
         state = self.store.read()
@@ -651,7 +744,14 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
         for env in sorted(state.envs.values(), key=lambda item: item.name):
             work = Worktree(root=env.worktree_path, name=env.name)
             host = state.hosts.get(env.host)
-            summary = EnvSummary(name=env.name, host=env.host, worktree=env.worktree_path, status="missing", image_digest=env.image_digest)
+            summary = EnvSummary(
+                name=env.name,
+                host=env.host,
+                worktree=env.worktree_path,
+                status="missing",
+                image_digest=env.image_digest,
+                last_used=last_activity(self.paths, env),
+            )
             if host is None:
                 summary.status = "host missing"
                 summary.fix = "Restore the registered host before managing this environment."
@@ -671,7 +771,10 @@ printf '{"tag":"%s","digest":%s}\\n' "$tag" "$image_id"
         return report
 
     def shell(self, *, cwd: Path | None = None) -> int:
-        work, _env, host = self.current(cwd)
+        with self.using("offbox shell", cwd) as (work, _env, host):
+            return self._shell(work, host)
+
+    def _shell(self, work: Worktree, host: HostState) -> int:
         container = self.inspect(host, work)
         if container is None or not container.state.running:
             raise PreconditionError("Environment is not running", "Run offbox up before opening a shell.")

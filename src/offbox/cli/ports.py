@@ -27,12 +27,12 @@ def ports(
         raise OffboxError("Runner is unavailable", "Restart offbox.")
     paths = Paths.discover()
     runtime = Runtime(paths, runner)
-    work, _env, host = runtime.current()
-    config = load_project(paths, work.root)
-    with host_operation(paths, host.name, wait_timeout=120, clock=runtime.clock):
-        report = runtime.ports.restore(work, host, config.ports)
-    if swap is not None:
-        report = runtime.ports.swap(work, swap)
+    with runtime.using("offbox ports") as (work, _env, host):
+        config = load_project(paths, work.root)
+        with host_operation(paths, host.name, wait_timeout=120, clock=runtime.clock):
+            report = runtime.ports.restore(work, host, config.ports)
+        if swap is not None:
+            report = runtime.ports.swap(work, swap)
     if json:
         console.json_out(report)
     else:
