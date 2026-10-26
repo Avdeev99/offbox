@@ -86,6 +86,15 @@ class ExecConfig(Model):
     env: list[str] = Field(default_factory=list)
 
 
+class FilesConfig(Model):
+    copy_: list[str] = Field(default_factory=list, alias="copy")
+
+
+class GitConfig(Model):
+    mirror: bool = False
+    refs: list[str] = Field(default_factory=list)
+
+
 class ProjectConfig(Model):
     env: EnvConfig = Field(default_factory=EnvConfig)
     install: InstallConfig = Field(default_factory=InstallConfig)
@@ -93,6 +102,8 @@ class ProjectConfig(Model):
     ports: PortsConfig = Field(default_factory=PortsConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
     exec: ExecConfig = Field(default_factory=ExecConfig)
+    files: FilesConfig = Field(default_factory=FilesConfig)
+    git: GitConfig = Field(default_factory=GitConfig)
 
 
 class HetznerCredentials(Model):

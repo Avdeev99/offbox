@@ -12,7 +12,7 @@ import pytest
 from fakes import FakeRunner, Script
 
 from offbox.errors import PreconditionError
-from offbox.execute import INSTALL_PROBE_SCRIPT, PREFLIGHT_SCRIPT, ExecOptions, Executor
+from offbox.execute import INSTALL_PROBE_SCRIPT, PREFLIGHT_SCRIPT, ExecOptions, Executor, install_marker
 from offbox.naming import worktree_name
 from offbox.paths import Paths
 from offbox.runner import Result, StreamProcess
@@ -63,10 +63,16 @@ class LockedRunner(FakeRunner):
             return super().stream(argv, env=env, stdin=stdin, tty=tty)
 
     def start_stream(
-        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        stdin: bool = False,
+        tty: bool = False,
+        keepalive: bool = False,
     ) -> StreamProcess:
         with self.lock:
-            return super().start_stream(argv, env=env, stdin=stdin, tty=tty)
+            return super().start_stream(argv, env=env, stdin=stdin, tty=tty, keepalive=keepalive)
 
 
 def setup(root: Path, config: str = "", *, ports: dict[int, int] | None = None) -> tuple[Paths, Path, str]:
@@ -121,7 +127,7 @@ def test_busy_host_lock_skips_port_restore_without_waiting_and_runs_the_command(
         [
             Script(prefix=["git"], stdout=str(root)),
             Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name)),
-            Script(prefix=["ssh", "-n"], method="start_stream", returncode=7),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream", returncode=7),
         ]
     )
     with (paths.state / "host-locks" / "main.lock").open("a") as held:
@@ -139,7 +145,7 @@ def test_port_restore_failure_warns_and_never_changes_the_command_status(tmp_pat
         [
             Script(prefix=["git"], stdout=str(root)),
             Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name)),
-            Script(prefix=["ssh", "-n"], method="start_stream", returncode=3),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream", returncode=3),
             master(returncode=255, stderr="permission denied on control socket"),
         ]
     )
@@ -200,14 +206,17 @@ def test_one_preflight_round_trip_carries_ownership_install_probe_and_compose_po
     runner = LockedRunner(
         [
             Script(prefix=["git"], stdout=str(root)),
-            Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name, install=f"{DIGEST}  -\n{DIGEST}", compose=compose)),
-            Script(prefix=["ssh", "-n"], method="start_stream"),
+            Script(
+                prefix=["ssh", "offbox-main"],
+                stdout=preflight(root, name, install=f"{DIGEST}  -\n{install_marker(DIGEST, 'uv sync')}", compose=compose),
+            ),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream"),
             master(),
             Script(prefix=["ssh", "-O", "forward", "-L", "127.0.0.1:5432:10.89.0.2:5432"]),
         ]
     )
     assert Executor(paths, runner).execute(ExecOptions(command=["true"], no_sync=True), cwd=root) == 0
-    remote = [call for call in runner.calls if call.argv[:2] == ["ssh", "offbox-main"]]
+    remote = [call for call in runner.calls if call.argv[:2] == ["ssh", "offbox-main"] and call.method == "run"]
     assert len(remote) == 1
     assert remote[0].input == PREFLIGHT_SCRIPT
     assert (
@@ -250,7 +259,7 @@ def test_failed_compose_discovery_falls_back_to_port_restore_and_still_runs(tmp_
                 stderr="compose.yaml: invalid",
             ),
             Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name, compose_failed=True)),
-            Script(prefix=["ssh", "-n"], method="start_stream"),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream"),
         ]
     )
     assert Executor(paths, runner).execute(ExecOptions(command=["true"], no_sync=True), cwd=root) == 0
@@ -275,8 +284,8 @@ def test_parallel_exec_waits_for_a_running_install_then_reprobes(tmp_path: Path,
         [
             Script(prefix=["git"], stdout=str(root)),
             Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name, install=f"{DIGEST}  -\nmissing")),
-            Script(prefix=["ssh", "offbox-main"], stdout=f"{DIGEST}  -\n{DIGEST}\n"),
-            Script(prefix=["ssh", "-n"], method="start_stream"),
+            Script(prefix=["ssh", "offbox-main"], stdout=f"{DIGEST}  -\n{install_marker(DIGEST, 'npm ci')}\n"),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream"),
         ]
     )
     assert Executor(paths, runner, clock=clock).execute(ExecOptions(command=["pytest"], no_sync=True), cwd=root) == 0
@@ -314,15 +323,15 @@ def test_uncontended_install_uses_the_preflight_probe_without_reprobing(tmp_path
         [
             Script(prefix=["git"], stdout=str(root)),
             Script(prefix=["ssh", "offbox-main"], stdout=preflight(root, name, install=f"{DIGEST}  -\nmissing")),
-            Script(prefix=["ssh", "-n"], method="start_stream"),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream"),
             Script(prefix=["ssh", "offbox-main"], stdout="b" * 64 + "  -\n"),
             Script(prefix=["ssh", "offbox-main"]),
-            Script(prefix=["ssh", "-n"], method="start_stream", returncode=4),
+            Script(prefix=["ssh", "offbox-main"], method="start_stream", returncode=4),
         ]
     )
     assert Executor(paths, runner).execute(ExecOptions(command=["pytest"], no_sync=True), cwd=root) == 4
     assert "npm ci" in runner.calls[2].argv[-1]
-    assert runner.calls[4].argv[-1].endswith("b" * 64)
+    assert runner.calls[4].argv[-1].endswith(install_marker("b" * 64, "npm ci"))
     assert "pytest" in runner.calls[5].argv[-1]
 
 

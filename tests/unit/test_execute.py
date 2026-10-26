@@ -26,20 +26,20 @@ def paths(root: Path) -> Paths:
 
 
 @pytest.mark.parametrize(
-    ("tty", "forced", "stdin", "ssh_flag", "docker_flags", "shim_flags"),
+    ("tty", "forced", "stdin", "ssh_flag", "docker_flags", "shim_flags", "watched"),
     [
-        (False, False, False, "-n", [], []),
-        (False, False, True, "", ["-i"], []),
-        (True, False, False, "-t", ["-i", "-t"], ["--tty"]),
-        (True, True, False, "-tt", ["-i", "-t"], ["--tty"]),
+        (False, False, False, "", [], [], True),
+        (False, False, True, "", ["-i"], [], False),
+        (True, False, False, "-t", ["-i", "-t"], ["--tty"], False),
+        (True, True, False, "-tt", ["-i", "-t"], ["--tty"], False),
     ],
 )
 def test_exact_exec_modes_preserve_remote_argv(
-    tty: bool, forced: bool, stdin: bool, ssh_flag: str, docker_flags: list[str], shim_flags: list[str]
+    tty: bool, forced: bool, stdin: bool, ssh_flag: str, docker_flags: list[str], shim_flags: list[str], watched: bool
 ) -> None:
     import shlex
 
-    from offbox.execute import command_argv
+    from offbox.execute import WATCH_SCRIPT, command_argv
 
     work, host = context()
     remote = [
@@ -52,6 +52,8 @@ def test_exact_exec_modes_preserve_remote_argv(
         "/work/nested",
         "-e",
         "CI=1",
+        "-e",
+        "OFFBOX_ENV=app-abcd",
         work.container,
         "offbox-run",
         *shim_flags,
@@ -62,6 +64,8 @@ def test_exact_exec_modes_preserve_remote_argv(
         "%s",
         "a; echo unexpected",
     ]
+    if watched:
+        remote = ["bash", "-c", WATCH_SCRIPT, "offbox-watch", work.container, "a" * 32, "0", *remote]
     assert command_argv(
         work,
         host,
@@ -73,6 +77,14 @@ def test_exact_exec_modes_preserve_remote_argv(
         force_pty=forced,
         stdin=stdin,
     ) == ["ssh", *([ssh_flag] if ssh_flag else []), "offbox-main", "--", shlex.join(remote)]
+
+
+def test_marker_env_wins_over_a_forwarded_value_of_the_same_name() -> None:
+    from offbox.execute import command_argv
+
+    work, host = context()
+    argv = command_argv(work, host, ["true"], run_id="a" * 32, env={"OFFBOX_ENV": "spoofed"})
+    assert argv[-1].index("OFFBOX_ENV=spoofed") < argv[-1].index("OFFBOX_ENV=app-abcd")
 
 
 @pytest.mark.parametrize("status", [0, 1, 42, 130, 143])
@@ -282,9 +294,14 @@ def test_setup_stdout_is_redirected_to_stderr() -> None:
     work, host = context()
     argv = command_argv(work, host, ["sh", "-c", "npm ci"], run_id="a" * 32, diagnostics=True)
     remote = shlex.split(argv[-1])
-    assert remote[:2] == ["sh", "-c"]
-    assert remote[2].startswith("exec docker exec -u dev -w /work ")
-    assert remote[2].endswith("sh -c 'npm ci' >&2")
+    assert remote[:2] == ["bash", "-c"]
+    assert remote[3:7] == ["offbox-watch", work.container, "a" * 32, "1"]
+    assert remote[7:10] == ["docker", "exec", "-u"]
+    assert remote[-3:] == ["sh", "-c", "npm ci"]
+    assert '"$@" </dev/null 3<&- >&2 &' in remote[2]
+    piped = shlex.split(command_argv(work, host, ["sh", "-c", "npm ci"], run_id="a" * 32, diagnostics=True, stdin=True)[-1])
+    assert piped[:2] == ["sh", "-c"]
+    assert piped[2].endswith("sh -c 'npm ci' >&2")
 
 
 def test_fake_scripts_reject_unknown_fields() -> None:

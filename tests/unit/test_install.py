@@ -6,7 +6,7 @@ from fakes import FakeRunner, Script
 
 from offbox.config import InstallConfig, ProjectConfig
 from offbox.errors import CommandFailed, OffboxError, PreconditionError
-from offbox.execute import Executor, install_paths
+from offbox.execute import Executor, install_marker, install_paths
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.state import HostState
@@ -46,19 +46,36 @@ def test_changed_install_hash_runs_with_scoped_env_then_atomically_records_posti
     assert len(runner.calls) == 4
     assert runner.calls[0].argv[-1].endswith("package-lock.json 'nested/lock file'")
     assert "-e NPM_TOKEN=private" in runner.calls[1].argv[-1]
-    assert runner.calls[3].argv[-1].endswith(after)
+    assert runner.calls[3].argv[-1].endswith(install_marker(after, "npm ci"))
     assert runner.calls[3].input is not None and 'mv -f -- "$tmp" "$path/install.sha256"' in runner.calls[3].input
     output = capsys.readouterr()
     assert output.out == ""
-    assert "lockfile changed, running install" in output.err
+    assert "install inputs changed, running install" in output.err
 
 
 def test_matching_hash_does_not_install_or_rewrite_marker(tmp_path: Path) -> None:
     executor, work, host = context(tmp_path)
-    runner = FakeRunner([Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + "a" * 64 + "\n")])
+    runner = FakeRunner([Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + install_marker("a" * 64, "false") + "\n")])
     executor.runner = runner
     executor.install(work, host, InstallConfig(command="false", when=["lock"]))
     assert [call.method for call in runner.calls] == ["run"]
+
+
+def test_changed_install_command_reinstalls_with_unchanged_files(tmp_path: Path) -> None:
+    executor, work, host = context(tmp_path)
+    runner = FakeRunner(
+        [
+            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n" + install_marker("a" * 64, "npm ci") + "\n"),
+            Script(prefix=["ssh"], method="start_stream"),
+            Script(prefix=["ssh"], stdout="a" * 64 + "  -\n"),
+            Script(prefix=["ssh"]),
+        ]
+    )
+    executor.runner = runner
+    executor.install(work, host, InstallConfig(command="npm install", when=["lock"]))
+    assert "npm install" in runner.calls[1].argv[-1]
+    assert runner.calls[-1].argv[-1].endswith(install_marker("a" * 64, "npm install"))
+    assert install_marker("a" * 64, "npm install") != install_marker("a" * 64, "npm ci")
 
 
 @pytest.mark.parametrize(
@@ -99,7 +116,7 @@ def test_changed_existing_marker_triggers_install(tmp_path: Path) -> None:
     assert len(runner.calls) == 4
     assert runner.calls[1].method == "start_stream"
     assert "npm ci" in runner.calls[1].argv[-1]
-    assert runner.calls[-1].argv[-1].endswith("a" * 64)
+    assert runner.calls[-1].argv[-1].endswith(install_marker("a" * 64, "npm ci"))
 
 
 @pytest.mark.parametrize("marker", ["", "\n", " \t\n"])

@@ -357,6 +357,70 @@ class Smoke:
             self.cli(work, "ports")
         self.complete("Parallel worktree commands run while forwarding is contended and forwards restore afterwards")
 
+    def git_mirror_and_file_copies(self) -> None:
+        work = self.worktrees[1]
+        secret = Path.home() / ".config/offbox-smoke/token.json"
+        secret.parent.mkdir(parents=True, exist_ok=True)
+        secret.write_text('{"token": "smoke"}\n')
+        config = work.root / "offbox.toml"
+        config.write_text(config.read_text() + '[git]\nmirror=true\nrefs=["main"]\n[files]\ncopy=["~/.config/offbox-smoke/token.json"]\n')
+        refused = self.cli(work, "exec", "--", "true", expected=3)
+        require("offbox up has not approved sharing" in refused.stderr, "exec ran sharing that up had not approved")
+        self.cli(work, "up", timeout=600)
+        probe = (
+            "git rev-parse HEAD; git rev-parse refs/heads/main; git diff --name-only; cat ~/.config/offbox-smoke/token.json; "
+            'printf "%s\\n" "$OFFBOX_ENV"'
+        )
+        local = [
+            self.run_command(["git", "rev-parse", "HEAD"], cwd=work.root).stdout,
+            self.run_command(["git", "rev-parse", "refs/heads/main"], cwd=work.root).stdout,
+            self.run_command(["git", "diff", "--name-only"], cwd=work.root).stdout,
+            secret.read_text(),
+            work.name + "\n",
+        ]
+        remote = self.cli(work, "exec", "--", "sh", "-c", probe).stdout
+        require(remote == "".join(local), f"Mirrored git state, copied file or OFFBOX_ENV differ: {remote!r} != {''.join(local)!r}")
+        (work.root / "note.txt").write_text("committed\n")
+        self.run_command(
+            ["git", "-c", "user.email=smoke@example.invalid", "-c", "user.name=Offbox smoke", "commit", "-qm", "next", "--", "note.txt"],
+            cwd=work.root,
+        )
+        head = self.run_command(["git", "rev-parse", "HEAD"], cwd=work.root).stdout
+        moved = self.cli(work, "exec", "--", "sh", "-c", "git rev-parse HEAD; git status --porcelain --untracked-files=no").stdout
+        require(moved == head + " M offbox.toml\n M site/index.html\n", f"Mirror did not follow a new commit: {moved!r}")
+        self.complete("Git mirror tracks HEAD, refs and the index; files.copy and OFFBOX_ENV reach the environment after approval")
+
+    def killed_client(self) -> None:
+        work = self.worktrees[0]
+        command = "echo $$ > /tmp/offbox-killed-client.pid; exec sleep 300"
+        process = self.runner.start_stream(
+            [
+                "sh",
+                "-c",
+                f"cd {shlex.quote(str(work.root))} && exec {shlex.quote(sys.executable)} -m offbox exec --no-sync -- sh -c {shlex.quote(command)}",
+            ]
+        )
+        pid = ""
+        deadline = self.clock.now() + 60
+        try:
+            while self.clock.now() < deadline and not pid.isdigit():
+                result = self.runner.run(["docker", "exec", work.container, "cat", "/tmp/offbox-killed-client.pid"], check=False, timeout=5)
+                pid = result.stdout.strip()
+                if not pid.isdigit():
+                    self.clock.sleep(0.2)
+        finally:
+            process.kill()
+        require(pid.isdigit(), "Remote command did not start before the client was killed")
+        deadline = self.clock.now() + 30
+        while self.clock.now() < deadline:
+            gone = self.runner.run(["docker", "exec", work.container, "sh", "-c", '! kill -0 "$1" 2>/dev/null', "sh", pid], check=False)
+            if gone.returncode == 0:
+                break
+            self.clock.sleep(0.5)
+        else:
+            raise PreconditionError("A SIGKILLed offbox exec left its remote command running", "Inspect the host watcher in execute.py.")
+        self.complete("SIGKILL of a local offbox exec stops its remote command")
+
     def existing_host_ownership(self) -> None:
         work = self.worktrees[0]
         nested = NestedHostRunner(self.host, work)
@@ -611,8 +675,10 @@ def main() -> int:
         smoke.batched_probe_guards()
         smoke.synchronization_and_execution()
         smoke.parallel_commands()
+        smoke.git_mirror_and_file_copies()
         smoke.existing_host_ownership()
         smoke.signals()
+        smoke.killed_client()
         smoke.forwarding_and_lifecycle()
     except OffboxError as exc:
         smoke.report.errors.append(str(exc))

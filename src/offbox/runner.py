@@ -8,7 +8,7 @@ import time
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Protocol
+from typing import IO, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -37,16 +37,20 @@ class StreamProcess(Protocol):
 
 
 class _SubprocessStream:
-    def __init__(self, process: subprocess.Popen[bytes], *, grouped: bool, started: float) -> None:
+    def __init__(self, process: subprocess.Popen[bytes], *, grouped: bool, started: float, keepalive: IO[bytes] | None = None) -> None:
         self.process = process
         self.grouped = grouped
         self.started = started
+        self.keepalive = keepalive
         self.finished = False
 
     def _finish(self, code: int | None) -> int | None:
         if code is not None and not self.finished:
             logger.debug("stream exit=%s duration=%.3f", code, time.monotonic() - self.started)
             self.finished = True
+            if self.keepalive is not None:
+                with suppress(OSError):
+                    self.keepalive.close()
         return code
 
     def poll(self) -> int | None:
@@ -95,8 +99,16 @@ class Runner(Protocol):
     def stream(self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False) -> int: ...
 
     def start_stream(
-        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
-    ) -> StreamProcess: ...
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        stdin: bool = False,
+        tty: bool = False,
+        keepalive: bool = False,
+    ) -> StreamProcess:
+        """keepalive gives the child a stdin pipe that stays open until this process ends, so the far side sees a client exit."""
+        ...
 
 
 class SubprocessRunner:
@@ -261,14 +273,19 @@ class SubprocessRunner:
         return result.returncode
 
     def start_stream(
-        self, argv: Sequence[str], *, env: Mapping[str, str] | None = None, stdin: bool = False, tty: bool = False
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        stdin: bool = False,
+        tty: bool = False,
+        keepalive: bool = False,
     ) -> StreamProcess:
         started, values = self._start(argv, env)
+        source = subprocess.PIPE if keepalive and not (stdin or tty) else None if stdin or tty else subprocess.DEVNULL
         try:
-            process = subprocess.Popen(
-                list(argv), env=values, stdin=None if stdin or tty else subprocess.DEVNULL, start_new_session=not tty
-            )
+            process = subprocess.Popen(list(argv), env=values, stdin=source, start_new_session=not tty)
         except OSError as exc:
             logger.error("stream launch failed duration=%.3f", time.monotonic() - started)
             raise PreconditionError(f"Cannot run {argv[0]}", f"Install {argv[0]} and check its permissions.") from exc
-        return _SubprocessStream(process, grouped=not tty, started=started)
+        return _SubprocessStream(process, grouped=not tty, started=started, keepalive=process.stdin if source == subprocess.PIPE else None)

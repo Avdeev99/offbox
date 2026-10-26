@@ -7,7 +7,7 @@ from fakes import FakeRunner, Script
 
 from offbox.config import ProjectConfig, load_config
 from offbox.errors import CommandFailed
-from offbox.execute import Executor
+from offbox.execute import Executor, install_marker
 from offbox.naming import Worktree
 from offbox.paths import Paths
 from offbox.state import HostState
@@ -66,9 +66,8 @@ def test_examples_install_before_stack_and_retain_failure(
     else:
         executor.up_stages(work, host, project)
         assert len(runner.calls) == 4
-        assert runner.calls[2].argv[-1].endswith("b" * 64)
+        assert runner.calls[2].argv[-1].endswith(install_marker("b" * 64, install))
     stages = [shlex.split(call.argv[-1]) for call in runner.calls if call.method == "start_stream"]
-    assert [stage[:2] for stage in stages] == [["sh", "-c"]] * len(stages)
-    assert [shlex.split(stage[-1])[-4:] for stage in stages] == [
-        ["sh", "-c", command, ">&2"] for command in ([install] if install_status else [install, stack])
-    ]
+    assert [stage[:2] for stage in stages] == [["bash", "-c"]] * len(stages)
+    assert [stage[6] for stage in stages] == ["1"] * len(stages)
+    assert [stage[-3:] for stage in stages] == [["sh", "-c", command] for command in ([install] if install_status else [install, stack])]

@@ -40,6 +40,10 @@ class EnvState(Model):
     active_forwards: list[int] = Field(default_factory=list[int])
     image_digest: str | None = None
     approved_exec_env: list[str] | None = None
+    approved_files: list[str] | None = None
+    approved_git: list[str] | None = None
+    copied_files: dict[str, str] = Field(default_factory=dict[str, str])
+    mirrored_git: str | None = None
 
 
 class State(Model):
