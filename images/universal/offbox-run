@@ -19,6 +19,78 @@ process_info() {
 }
 
 state_dir=/run/offbox/exec
+cgroup_root=/sys/fs/cgroup/offbox
+sudo=
+[ "$(id -u)" = 0 ] || sudo='sudo -n'
+
+cgroup_occupied() {
+    grep -q . "$cgroup_root/$1/cgroup.procs" 2>/dev/null
+}
+
+cgroup_wait_empty() {
+    tries=$2
+    while [ "$tries" -gt 0 ]; do
+        cgroup_occupied "$1" || return 0
+        sleep 0.1
+        tries=$((tries - 1))
+    done
+    ! cgroup_occupied "$1"
+}
+
+cgroup_kill() {
+    [ ! -f "$cgroup_root/$1/cgroup.kill" ] || printf '1\n' > "$cgroup_root/$1/cgroup.kill" 2>/dev/null || :
+}
+
+cgroup_stop() {
+    [ -d "$cgroup_root/$1" ] || return 0
+    while IFS= read -r member; do
+        [ "$(process_info "$member" | awk '{print $1}')" != "$2" ] || continue
+        /bin/kill -TERM "$member" 2>/dev/null || :
+    done < "$cgroup_root/$1/cgroup.procs"
+    if ! cgroup_wait_empty "$1" 30; then
+        cgroup_kill "$1"
+        cgroup_wait_empty "$1" 10 || :
+    fi
+    rmdir "$cgroup_root/$1" 2>/dev/null || :
+}
+
+if [ "${1:-}" = --cgroup ]; then
+    [ "$(id -u)" = 0 ] || fail 'Run cgroups are managed as root.' 'Let offbox-run call this mode through sudo.'
+    umask 022
+    action=${2:-}
+    if [ "$action" = prune ]; then
+        for run_cgroup in "$cgroup_root"/*; do
+            [ -d "$run_cgroup" ] || continue
+            # A cgroup without a record may belong to a run that is still starting; only an older one is orphaned.
+            if [ -e "$state_dir/${run_cgroup##*/}.code" ] || { [ ! -e "$state_dir/${run_cgroup##*/}.pid" ] && [ -n "$(find "$run_cgroup" -maxdepth 0 -mmin +1)" ]; }; then
+                rmdir "$run_cgroup" 2>/dev/null || :
+            fi
+        done
+        exit 0
+    fi
+    validate_id "${3:-}"
+    case "$action" in
+        join)
+            case "${4:-}" in ''|*[!0-9]*) fail 'Invalid process ID.' 'Pass the PID of the run command.' ;; esac
+            [ "$4" -gt 1 ] || fail 'Unsafe process ID.' 'Pass the PID of the run command.'
+            [ -f /sys/fs/cgroup/cgroup.controllers ] || exit 0
+            mkdir -p "$cgroup_root/$3"
+            if [ ! -f "$cgroup_root/$3/cgroup.kill" ]; then
+                rmdir "$cgroup_root/$3" 2>/dev/null || :
+                exit 0
+            fi
+            printf '%s\n' "$4" > "$cgroup_root/$3/cgroup.procs" 2>/dev/null || {
+                mkdir -p "$cgroup_root/$3"
+                printf '%s\n' "$4" > "$cgroup_root/$3/cgroup.procs"
+            }
+            ;;
+        release) rmdir "$cgroup_root/$3" 2>/dev/null || : ;;
+        stop) cgroup_stop "$3" "${4:-}" ;;
+        *) fail 'Unknown cgroup action.' 'Use join, release, stop or prune.' ;;
+    esac
+    exit 0
+fi
+
 mkdir -p "$state_dir"
 if [ "${1:-}" = --signal ]; then
     [ "$#" -eq 3 ] || fail 'Expected --signal SIGNAL ID.' 'Pass INT, TERM or KILL and the recorded run ID.'
@@ -37,7 +109,10 @@ if [ "${1:-}" = --signal ]; then
     [ "$pid" -gt 1 ] || fail 'Unsafe process group.' 'Check the run status before retrying.'
     actual=$(process_info "$pid")
     [ "$actual" = "$pid $started" ] || fail 'Run process group no longer matches its recorded identity.' 'Check the run status; do not signal a reused PID.'
+    # The marker makes the run stop its whole cgroup once the group exits; mkdir never follows a planted link.
+    mkdir "$state_dir/$run_id.stopped" 2>/dev/null || :
     /bin/kill -"$signal" -- "-$pid"
+    [ "$signal" != KILL ] || cgroup_kill "$run_id"
     exit 0
 fi
 
@@ -80,7 +155,11 @@ find "$state_dir" -maxdepth 1 -type f -mmin +1440 -print | while IFS= read -r ex
             ;;
     esac
     rm -f "$state_dir/$expired_id.code" "$state_dir/$expired_id.pid" "$state_dir/$expired_id.start" "$state_dir/$expired_id.tty" "$state_dir/$expired_id.code.tmp"
+    rmdir "$state_dir/$expired_id.stopped" 2>/dev/null || :
 done
+if find "$cgroup_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -q .; then
+    $sudo /usr/local/bin/offbox-run --cgroup prune </dev/null >/dev/null 2>&1 || :
+fi
 cd "$directory" || fail 'Cannot enter the work directory.' 'Flush sync and check that the remote directory exists.'
 child_pid=
 pending_signal=
@@ -106,7 +185,10 @@ umask 022
 if [ "$tty" = 1 ]; then
     env --default-signal=INT,TERM,HUP -- "$@" <&3 3<&- &
 else
-    setsid env --default-signal=INT,TERM,HUP -- "$@" <&3 3<&- &
+    # The command joins its own cgroup before it executes, so a stop reaches every descendant, even one that ran setsid.
+    # shellcheck disable=SC2016 # expanded by the child shell, which receives sudo, the run ID and the argv
+    setsid env --default-signal=INT,TERM,HUP sh -c '$1 /usr/local/bin/offbox-run --cgroup join "$2" "$$" </dev/null >/dev/null 2>&1 || :; shift 2; exec "$@"' \
+        offbox-run "$sudo" "$run_id" "$@" <&3 3<&- &
 fi
 child_pid=$!
 umask 077
@@ -125,7 +207,16 @@ while :; do
     fi
     kill -0 "$child_pid" 2>/dev/null || break
 done
+leader=$child_pid
 child_pid=
+if [ "$tty" = 0 ]; then
+    if [ -d "$state_dir/$run_id.stopped" ]; then
+        $sudo /usr/local/bin/offbox-run --cgroup stop "$run_id" "$leader" </dev/null >/dev/null 2>&1 || :
+    else
+        $sudo /usr/local/bin/offbox-run --cgroup release "$run_id" </dev/null >/dev/null 2>&1 || :
+    fi
+    rmdir "$state_dir/$run_id.stopped" 2>/dev/null || :
+fi
 printf '%s\n' "$status" > "$state_dir/$run_id.code.tmp"
 mv "$state_dir/$run_id.code.tmp" "$state_dir/$run_id.code"
 exit "$status"
