@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Stopping an `offbox exec` run (Ctrl-C, SIGTERM, a killed client or `offbox-run --signal`) now also stops the processes it started that left its process group, such as workers started with `setsid`. Each non-TTY run gets its own cgroup in the universal image; runs that exit on their own keep their background processes.
+
 ## [0.1.0] - 2026-10-26
 
 First public release.

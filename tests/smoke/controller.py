@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import sys
 from collections.abc import Mapping, Sequence
@@ -28,6 +29,15 @@ from offbox.state import HostState, State, StateStore
 from offbox.sync import SyncManager
 
 logger = logging.getLogger(__name__)
+
+
+def detached_children(prefix: str) -> str:
+    """Shell that starts a detached child and a detached TERM-ignoring child, recording their PIDs and the run cgroup."""
+    return (
+        f"cat /proc/$$/cgroup > {prefix}.cgroup; "
+        f"setsid sleep 300 </dev/null >/dev/null 2>&1 & echo $! > {prefix}.detached; "
+        f"setsid sh -c 'trap \"\" TERM; exec sleep 300' </dev/null >/dev/null 2>&1 & echo $! >> {prefix}.detached; "
+    )
 
 
 class FixtureManifest(Model):
@@ -388,9 +398,36 @@ class Smoke:
         require(moved == head + " M offbox.toml\n M site/index.html\n", f"Mirror did not follow a new commit: {moved!r}")
         self.complete("Git mirror tracks HEAD, refs and the index; files.copy and OFFBOX_ENV reach the environment after approval")
 
+    def require_run_cleaned(self, work: Worktree, prefix: str, *, within: float) -> None:
+        membership = self.run_command(["docker", "exec", work.container, "cat", f"{prefix}.cgroup"]).stdout
+        require(re.fullmatch(r"0::/offbox/[A-Za-z0-9_-]+\n", membership) is not None, f"Run did not join its cgroup: {membership!r}")
+        pids = self.run_command(["docker", "exec", work.container, "cat", f"{prefix}.detached"]).stdout.split()
+        require(len(pids) == 2 and all(pid.isdigit() for pid in pids), f"Detached children were not recorded: {pids}")
+        gone = 'for pid; do [ ! -d "/proc/$pid" ] || grep -q "^State:.*Z" "/proc/$pid/status" || exit 1; done'
+        deadline = self.clock.now() + within
+        while self.runner.run(["docker", "exec", work.container, "sh", "-c", gone, "sh", *pids], check=False, timeout=5).returncode:
+            require(self.clock.now() < deadline, f"Detached children outlived the stopped run: {pids}")
+            self.clock.sleep(0.2)
+        cgroup = "/sys/fs/cgroup" + membership.strip().removeprefix("0::")
+        self.run_command(["docker", "exec", work.container, "test", "!", "-e", cgroup])
+
+    def finished_run_keeps_background(self) -> None:
+        work = self.worktrees[0]
+        command = "setsid sleep 300 </dev/null >/dev/null 2>&1 & echo $! > /tmp/offbox-kept.pid; exit 3"
+        self.cli(work, "exec", "--no-sync", "--", "sh", "-c", command, expected=3)
+        pid = self.run_command(["docker", "exec", work.container, "cat", "/tmp/offbox-kept.pid"]).stdout.strip()
+        require(pid.isdigit(), "The finished run did not record its background process")
+        alive = '[ -d "/proc/$1" ] && ! grep -q "^State:.*Z" "/proc/$1/status"'
+        self.run_command(["docker", "exec", work.container, "sh", "-c", alive, "sh", pid])
+        membership = self.run_command(["docker", "exec", work.container, "cat", f"/proc/{pid}/cgroup"]).stdout
+        require(re.fullmatch(r"0::/offbox/[A-Za-z0-9_-]+\n", membership) is not None, f"Kept process left its run cgroup: {membership!r}")
+        self.run_command(["docker", "exec", work.container, "test", "-d", "/sys/fs/cgroup" + membership.strip().removeprefix("0::")])
+        self.run_command(["docker", "exec", work.container, "kill", pid])
+        self.complete("A run that exits on its own keeps the background processes it left")
+
     def killed_client(self) -> None:
         work = self.worktrees[0]
-        command = "echo $$ > /tmp/offbox-killed-client.pid; exec sleep 300"
+        command = detached_children("/tmp/offbox-killed-client") + "echo $$ > /tmp/offbox-killed-client.pid; exec sleep 300"
         process = self.runner.start_stream(
             [
                 "sh",
@@ -417,7 +454,8 @@ class Smoke:
             self.clock.sleep(0.5)
         else:
             raise PreconditionError("A SIGKILLed offbox exec left its remote command running", "Inspect the host watcher in execute.py.")
-        self.complete("SIGKILL of a local offbox exec stops its remote command")
+        self.require_run_cleaned(work, "/tmp/offbox-killed-client", within=15)
+        self.complete("SIGKILL of a local offbox exec stops its remote command and its detached descendants")
 
     def existing_host_ownership(self) -> None:
         work = self.worktrees[0]
@@ -545,7 +583,8 @@ class Smoke:
         for name, status in (("INT", 130), ("TERM", 143)):
             output = self.artifacts / f"signal-{name}.stdout.log"
             errors = self.artifacts / f"signal-{name}.stderr.log"
-            command = f'trap "exit 130" INT; trap "exit 143" TERM; echo $$ > /work/signal-{name}.pid; sleep 300'
+            prefix = f"/tmp/offbox-signal-{name}"
+            command = detached_children(prefix) + f'trap "exit 130" INT; trap "exit 143" TERM; echo $$ > /work/signal-{name}.pid; sleep 300'
             result = self.run_command(
                 [
                     "bash",
@@ -586,7 +625,8 @@ class Smoke:
                     name,
                 ]
             )
-        self.complete("Real CLI SIGINT/SIGTERM exit130/143 within ten seconds and leave no remote process group")
+            self.require_run_cleaned(work, prefix, within=0)
+        self.complete("Real CLI SIGINT/SIGTERM exit130/143 within ten seconds and leave no remote process or detached descendant")
 
     def local_port(self, work: Worktree) -> int:
         result = self.cli(work, "ports", "--json")
@@ -685,6 +725,7 @@ def main() -> int:
         smoke.existing_host_ownership()
         smoke.signals()
         smoke.killed_client()
+        smoke.finished_run_keeps_background()
         smoke.forwarding_and_lifecycle()
     except OffboxError as exc:
         smoke.report.errors.append(str(exc))
