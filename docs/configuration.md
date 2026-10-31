@@ -235,7 +235,7 @@ A registered environment always uses its recorded host. Changing the default doe
 
 ## Auto-managed hosts
 
-An auto-managed host exists only while worktrees use it. Opt in per preset:
+An auto-managed host can be created on demand and deleted when no longer needed. Cleanup depends on `rm`, `host reap` or the optional timer; it does not run merely because work stopped. Opt in per preset:
 
 ```toml
 # ~/.config/offbox/config.toml
@@ -271,7 +271,7 @@ When the last `rm` finds the host busy, it waits a minute, then names the comman
 
 ## Credentials
 
-Prefer a local `HCLOUD_TOKEN` environment variable. Alternatively, create the credentials file at the path above:
+For interactive provisioning, use a local `HCLOUD_TOKEN` environment variable or the credentials file below. For the idle reaper timer, use the file: scheduled runs do not inherit your shell-only token. Create it at the path above:
 
 ```toml
 [hetzner]

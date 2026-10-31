@@ -45,6 +45,6 @@ TF_CLI_ARGS=-no-color
 TF_PLUGIN_CACHE_DIR=<offbox cache>/tofu-plugins
 ```
 
-Creation runs `init -input=false`, `apply -auto-approve -input=false` and `output -json` in that order. Destroy runs `destroy -auto-approve -input=false` against the saved copy. The copied workspace is retained after failure and removed only after successful teardown.
+Creation runs `init -input=false`, `apply -auto-approve -input=false` and `output -json` in that order. Destroy first runs `init -input=false`, then `destroy -auto-approve -input=false` against the saved copy, so provider plugins can be restored after cache removal. The copied workspace is retained after failure and removed only after successful teardown.
 
 Run `terraform fmt -check` and `terraform init -backend=false` followed by `terraform validate` in a disposable copy to check provider syntax and schemas. A `tests/*.tftest.hcl` file with `mock_provider` runs `terraform test` or `tofu test` without credentials; see the built-in providers. These commands do not create cloud resources. Keep actual provisioning out of the unit test suite.
