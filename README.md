@@ -47,27 +47,7 @@ Hosts created by guided setup are manual: removing an environment does not delet
 
 ## How it works
 
-```mermaid
-flowchart LR
-    subgraph Laptop
-        Editor[Editor and coding agents]
-        A[Git worktree A]
-        B[Git worktree B]
-        CLI[offbox CLI and local state]
-    end
-    subgraph Host[Personal SSH host]
-        WA[Work directory A]
-        WB[Work directory B]
-        EA[Environment A: Docker daemon + volumes]
-        EB[Environment B: Docker daemon + volumes]
-        WA --> EA
-        WB --> EB
-    end
-    A <-->|Mutagen: source files| WA
-    B <-->|Mutagen: source files| WB
-    CLI -->|SSH: commands and port forwards| EA
-    CLI -->|SSH: commands and port forwards| EB
-```
+![offbox architecture: local worktrees sync to separate remote Docker environments, with Git mirroring and SSH command execution and port forwarding](https://raw.githubusercontent.com/o-avdieiev/offbox/master/docs/images/how-it-works.svg)
 
 Both worktrees can publish remote port 8000 and use the same Compose container names. Offbox gives them separate Docker daemons and local forwards such as `localhost:8000` and `localhost:8001`. `offbox ports --swap 8000` exchanges the preferred local port when an app needs a fixed callback URL.
 

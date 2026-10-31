@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+<title id="title">offbox — how it works</title>
+<desc id="desc">Edit worktrees A and B locally. Mutagen synchronizes each to its own host directory, mounted at /work in a separate privileged container. Git history is mirrored separately. The offbox CLI runs commands through SSH and docker exec; SSH tunnels expose remote services on distinct localhost ports.</desc>
+<defs><marker id="navy" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto-start-reverse"><path d="M0 0L8 4L0 8" fill="none" stroke="#162b51" stroke-width="1.5"/></marker><marker id="teal" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto-start-reverse"><path d="M0 0L8 4L0 8" fill="none" stroke="#008c79" stroke-width="1.5"/></marker><marker id="purple" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#7442d6" stroke-width="1.5"/></marker></defs>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#142649} .small{font-size:18px;fill:#526480} .label{font-size:20px;font-weight:600} .line{fill:none;stroke:#162b51;stroke-width:2.5;marker-end:url(#navy)}</style><rect width="1600" height="1000" fill="#fff"/>
+<text x="800" y="65" font-size="48" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="middle">offbox — how it works</text>
+<text x="800" y="108" font-size="25" fill="#526480" style="fill:#526480" font-weight="400" text-anchor="middle">Edit locally. Run each worktree in its own remote environment.</text>
+<rect x="25" y="145" width="410" height="650" rx="14" fill="#f4f8fd" stroke="#b8cee7" stroke-width="2"/>
+<rect x="755" y="145" width="820" height="650" rx="14" fill="#f4f8fd" stroke="#b8cee7" stroke-width="2"/>
+<text x="55" y="195" font-size="32" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="start">Your laptop</text>
+<text x="785" y="195" font-size="32" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="start">Your SSH host</text>
+<rect x="60" y="225" width="340" height="75" rx="14" fill="#fff" stroke="#7899c0" stroke-width="2"/>
+<text x="230" y="270" font-size="24" fill="#142649" style="fill:#142649" font-weight="600" text-anchor="middle">Editor / coding agent</text>
+<rect x="60" y="340" width="340" height="105" rx="14" fill="#fff" stroke="#7899c0" stroke-width="2"/>
+<text x="230" y="383" font-size="25" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="middle">Worktree A</text>
+<text x="230" y="416" font-size="19" fill="#526480" style="fill:#526480" font-weight="400" text-anchor="middle">Source files + local Git</text>
+<rect x="60" y="575" width="340" height="105" rx="14" fill="#fff" stroke="#7899c0" stroke-width="2"/>
+<text x="230" y="618" font-size="25" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="middle">Worktree B</text>
+<text x="230" y="651" font-size="19" fill="#526480" style="fill:#526480" font-weight="400" text-anchor="middle">Source files + local Git</text>
+<path d="M95 300 V340" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<path d="M60 262 H43 V625 H60" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<rect x="60" y="690" width="340" height="75" rx="14" fill="#fff" stroke="#7899c0" stroke-width="2"/>
+<text x="230" y="736" font-size="26" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="middle">offbox CLI</text>
+<rect x="785" y="340" width="220" height="110" rx="14" fill="#fff" stroke="#7899c0" stroke-width="2"/>
+<text x="895" y="382" font-size="22" fill="#142649" style="fill:#142649" font-weight="600" text-anchor="middle">Work directory A</text>
+<text x="895" y="415" font-size="18" fill="#526480" style="fill:#526480" font-weight="400" text-anchor="middle">Source files + .git</text>
+<rect x="1160" y="275" width="390" height="205" rx="14" fill="#faf7ff" stroke="#8861d2" stroke-width="2"/>
+<text x="1180" y="309" font-size="25" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="start">Environment A</text>
+<text x="1180" y="336" font-size="18" fill="#7442d6" style="fill:#7442d6" font-weight="400" text-anchor="start">Privileged Docker container</text>
+<rect x="1175" y="351" width="360" height="34" rx="6" fill="#fff" stroke="#dfd6ef" stroke-width="2"/>
+<text x="1190" y="375" font-size="19" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="start">/work · mounted source + Git</text>
+<rect x="1175" y="391" width="360" height="34" rx="6" fill="#fff" stroke="#dfd6ef" stroke-width="2"/>
+<text x="1190" y="415" font-size="19" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="start">Inner Docker daemon</text>
+<rect x="1175" y="431" width="360" height="34" rx="6" fill="#fff" stroke="#dfd6ef" stroke-width="2"/>
+<text x="1190" y="455" font-size="19" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="start">Services + Docker volumes</text>
+<path d="M400 385 H785" fill="none" stroke="#008c79" stroke-width="3" marker-end="url(#teal)" marker-start="url(#teal)"/>
+<text x="585" y="368" font-size="19" fill="#008c79" style="fill:#008c79" font-weight="600" text-anchor="middle">Mutagen · two-way files</text>
+<path d="M400 428 H785" fill="none" stroke="#7442d6" stroke-width="3" marker-end="url(#purple)" stroke-dasharray="3 8" stroke-linecap="round"/>
+<text x="585" y="454" font-size="18" fill="#7442d6" style="fill:#7442d6" font-weight="400" text-anchor="middle">Git history · one-way mirror</text>
+<path d="M1005 371 H1160" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<text x="1082" y="342" font-size="18" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="middle">Bind mount</text>
+<text x="1082" y="364" font-size="18" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="middle">→ /work</text>
+<rect x="785" y="575" width="220" height="110" rx="14" fill="#fff" stroke="#7899c0" stroke-width="2"/>
+<text x="895" y="617" font-size="22" fill="#142649" style="fill:#142649" font-weight="600" text-anchor="middle">Work directory B</text>
+<text x="895" y="650" font-size="18" fill="#526480" style="fill:#526480" font-weight="400" text-anchor="middle">Source files + .git</text>
+<rect x="1160" y="510" width="390" height="205" rx="14" fill="#faf7ff" stroke="#8861d2" stroke-width="2"/>
+<text x="1180" y="544" font-size="25" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="start">Environment B</text>
+<text x="1180" y="571" font-size="18" fill="#7442d6" style="fill:#7442d6" font-weight="400" text-anchor="start">Privileged Docker container</text>
+<rect x="1175" y="586" width="360" height="34" rx="6" fill="#fff" stroke="#dfd6ef" stroke-width="2"/>
+<text x="1190" y="610" font-size="19" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="start">/work · mounted source + Git</text>
+<rect x="1175" y="626" width="360" height="34" rx="6" fill="#fff" stroke="#dfd6ef" stroke-width="2"/>
+<text x="1190" y="650" font-size="19" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="start">Inner Docker daemon</text>
+<rect x="1175" y="666" width="360" height="34" rx="6" fill="#fff" stroke="#dfd6ef" stroke-width="2"/>
+<text x="1190" y="690" font-size="19" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="start">Services + Docker volumes</text>
+<path d="M400 620 H785" fill="none" stroke="#008c79" stroke-width="3" marker-end="url(#teal)" marker-start="url(#teal)"/>
+<text x="585" y="603" font-size="19" fill="#008c79" style="fill:#008c79" font-weight="600" text-anchor="middle">Mutagen · two-way files</text>
+<path d="M400 663 H785" fill="none" stroke="#7442d6" stroke-width="3" marker-end="url(#purple)" stroke-dasharray="3 8" stroke-linecap="round"/>
+<text x="585" y="689" font-size="18" fill="#7442d6" style="fill:#7442d6" font-weight="400" text-anchor="middle">Git history · one-way mirror</text>
+<path d="M1005 606 H1160" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<text x="1082" y="577" font-size="18" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="middle">Bind mount</text>
+<text x="1082" y="599" font-size="18" fill="#142649" style="fill:#142649" font-weight="400" text-anchor="middle">→ /work</text>
+<path d="M400 730 H1125 V460 H1160" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<path d="M1125 730 V700 H1160" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<text x="720" y="720" font-size="21" fill="#142649" style="fill:#142649" font-weight="600" text-anchor="middle">SSH → docker exec</text>
+<rect x="25" y="825" width="1550" height="105" rx="14" fill="#f1faf8" stroke="#b9e5dc" stroke-width="2"/>
+<text x="65" y="886" font-size="25" fill="#142649" style="fill:#142649" font-weight="700" text-anchor="start">Browser</text>
+<path d="M175 877 H225" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<rect x="240" y="849" width="450" height="55" rx="10" fill="#e0f5ef" stroke="#9bd9cb" stroke-width="2"/>
+<text x="465" y="884" font-size="22" fill="#142649" style="fill:#142649" font-weight="600" text-anchor="middle">localhost:8000 / localhost:8001</text>
+<path d="M710 877 H1160" fill="none" stroke="#162b51" stroke-width="3" marker-end="url(#navy)"/>
+<text x="935" y="861" font-size="21" fill="#142649" style="fill:#142649" font-weight="600" text-anchor="middle">SSH tunnels</text>
+<rect x="1180" y="849" width="345" height="55" rx="10" fill="#f1eaff" stroke="#bba2e4" stroke-width="2"/>
+<text x="1352" y="884" font-size="23" fill="#142649" style="fill:#142649" font-weight="600" text-anchor="middle">Remote services</text>
+<text x="800" y="970" font-size="20" fill="#526480" style="fill:#526480" font-weight="400" text-anchor="middle">Each environment has its own Docker daemon and volumes. Commit and push from your laptop.</text>
+</svg>
