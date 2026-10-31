@@ -87,7 +87,7 @@ def test_durations_parse_and_lifecycle_presets_validate() -> None:
     with pytest.raises(ValidationError, match="duration"):
         HostPreset(auto=True, idle="soon")
     assert HostPreset().auto is False
-    assert EnvConfig(host="agg-ai").host == "agg-ai"
+    assert EnvConfig(host="dev-host").host == "dev-host"
     with pytest.raises(ValidationError):
         EnvConfig(host="Bad Name")
 
