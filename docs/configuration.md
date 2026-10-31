@@ -239,17 +239,17 @@ An auto-managed host can be created on demand and deleted when no longer needed.
 
 ```toml
 # ~/.config/offbox/config.toml
-[hosts.agg-ai]
+[hosts.dev-host]
 provider = "hetzner"
 size = "ccx33"
 auto = true
 idle = "2h"
 
 [project.env]          # or env.host in a repository's offbox.toml
-host = "agg-ai"
+host = "dev-host"
 ```
 
-**Creation.** `offbox up` in a worktree whose host is `agg-ai` creates the VM `offbox-agg-ai` if it does not exist, prints `Creating auto-managed host agg-ai: billable until destroyed; …`, and continues. Parallel `up` commands on the same laptop create it once: they serialize on the host's lock, wait up to 15 minutes, and join the new host. A repository can only name a host; creation needs a user preset with `auto = true`. If cloud resources named `offbox-agg-ai` already exist (for example from another laptop), creation stops instead of adopting or duplicating them. An auto-managed host never becomes the default host: creation does not set it, `offbox host use` refuses it, and destroying the default host does not promote one. `auto` and `idle` are recorded when the host is created; editing the preset later affects the next host, not a running one. Hosts made by `offbox host create`, `setup` or `host init` are never destroyed automatically.
+**Creation.** `offbox up` in a worktree whose host is `dev-host` creates the VM `offbox-dev-host` if it does not exist, prints `Creating auto-managed host dev-host: billable until destroyed; …`, and continues. Parallel `up` commands on the same laptop create it once: they serialize on the host's lock, wait up to 15 minutes, and join the new host. A repository can only name a host; creation needs a user preset with `auto = true`. If cloud resources named `offbox-dev-host` already exist (for example from another laptop), creation stops instead of adopting or duplicating them. An auto-managed host never becomes the default host: creation does not set it, `offbox host use` refuses it, and destroying the default host does not promote one. `auto` and `idle` are recorded when the host is created; editing the preset later affects the next host, not a running one. Hosts made by `offbox host create`, `setup` or `host init` are never destroyed automatically.
 
 **Destruction.** Only these commands destroy an auto-managed host:
 
